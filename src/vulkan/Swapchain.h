@@ -28,14 +28,18 @@ public:
     VkFormat GetImageFormat() const { return m_imageFormat; }
     VkFormat GetDepthFormat() const { return m_depthFormat; }
     VkExtent2D GetExtent() const { return m_extent; }
+    const std::vector<VkImage>& GetImages() const { return m_images; }
     const std::vector<VkImageView>& GetImageViews() const { return m_imageViews; }
+    uint32_t GetImageCount() const { return static_cast<uint32_t>(m_images.size()); }
     VkImageView GetDepthImageView() const { return m_depthImageView; }
 
     VkResult AcquireNextImage(uint32_t* imageIndex);
     VkResult Present(uint32_t imageIndex);
 
-    VkSemaphore GetImageAvailableSemaphore(uint32_t frame) const { return m_imageAvailableSemaphores[frame]; }
-    VkSemaphore GetRenderFinishedSemaphore(uint32_t frame) const { return m_renderFinishedSemaphores[frame]; }
+    // imageAvailableSemaphores[imageIndex] is the semaphore to wait on before rendering to that image.
+    // Always read this AFTER AcquireNextImage() returns the imageIndex.
+    VkSemaphore GetImageAvailableSemaphore(uint32_t imageIndex) const { return m_imageAvailableSemaphores[imageIndex]; }
+    VkSemaphore GetRenderFinishedSemaphore(uint32_t imageIndex) const { return m_renderFinishedSemaphores[imageIndex]; }
     VkFence GetInFlightFence(uint32_t frame) const { return m_inFlightFences[frame]; }
 
     static SwapchainSupportDetails QuerySupport(VkPhysicalDevice device, VkSurfaceKHR surface);
@@ -65,7 +69,11 @@ private:
     VmaAllocation m_depthImageAllocation = VK_NULL_HANDLE;
     VkImageView m_depthImageView = VK_NULL_HANDLE;
 
-    std::vector<VkSemaphore> m_imageAvailableSemaphores;
+    // Per-swapchain-image semaphores (indexed by imageIndex returned from vkAcquireNextImageKHR).
+    // A spare semaphore is used during acquire and then swapped in so each image always
+    // owns its semaphore and cannot be reused while the display engine still holds it.
+    std::vector<VkSemaphore> m_imageAvailableSemaphores; // size = image count
+    VkSemaphore m_spareSemaphore = VK_NULL_HANDLE;       // rotating acquire target
     std::vector<VkSemaphore> m_renderFinishedSemaphores;
     std::vector<VkFence> m_inFlightFences;
     uint32_t m_currentFrame = 0;

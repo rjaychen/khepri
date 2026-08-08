@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.20)
+﻿cmake_minimum_required(VERSION 3.20)
 set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
 project(VulkanGeometryEngine VERSION 1.0 LANGUAGES C CXX)
 
@@ -106,4 +106,44 @@ target_link_libraries(VulkanGeometryEngine PRIVATE
 
 if(MSVC)
     target_compile_options(VulkanGeometryEngine PRIVATE /W4 /utf-8)
+endif()
+
+# -------------------------------------------------------
+# Shader compilation (GLSL -> SPIR-V via glslc from SDK)
+# -------------------------------------------------------
+find_program(GLSLC glslc HINTS
+    "$ENV{VULKAN_SDK}/Bin"
+    "C:/VulkanSDK/1.4.357.0/Bin"
+    "C:/VulkanSDK/1.4.321.0/Bin"
+    "C:/VulkanSDK/1.3.283.0/Bin"
+)
+
+if(GLSLC)
+    message(STATUS "Found glslc: ${GLSLC}")
+    set(SHADER_SOURCE_DIR "${CMAKE_SOURCE_DIR}/shaders")
+    set(SHADER_OUTPUT_DIR "${CMAKE_SOURCE_DIR}/shaders/compiled")
+    file(MAKE_DIRECTORY ${SHADER_OUTPUT_DIR})
+
+    set(SHADER_SOURCES
+        ${SHADER_SOURCE_DIR}/mesh.vert
+        ${SHADER_SOURCE_DIR}/mesh.frag
+    )
+
+    foreach(SHADER ${SHADER_SOURCES})
+        get_filename_component(SHADER_NAME ${SHADER} NAME)
+        set(SPV_OUTPUT "${SHADER_OUTPUT_DIR}/${SHADER_NAME}.spv")
+        add_custom_command(
+            OUTPUT  ${SPV_OUTPUT}
+            COMMAND ${GLSLC} --target-env=vulkan1.3 -O ${SHADER} -o ${SPV_OUTPUT}
+            DEPENDS ${SHADER}
+            COMMENT "Compiling shader: ${SHADER_NAME} -> ${SHADER_NAME}.spv"
+        )
+        list(APPEND SPV_OUTPUTS ${SPV_OUTPUT})
+    endforeach()
+
+    add_custom_target(Shaders ALL DEPENDS ${SPV_OUTPUTS})
+    add_dependencies(VulkanGeometryEngine Shaders)
+    message(STATUS "Shader auto-compilation enabled")
+else()
+    message(WARNING "glslc not found - shaders will NOT be compiled automatically. Install Vulkan SDK.")
 endif()

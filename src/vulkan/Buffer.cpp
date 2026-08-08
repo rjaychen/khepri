@@ -6,9 +6,11 @@
 Buffer::Buffer(VulkanContext& context, VkDeviceSize size, VkBufferUsageFlags usage, VmaMemoryUsage memoryUsage, VmaAllocationCreateFlags flags)
     : m_context(&context), m_size(size) {
 
+    VkDeviceSize allocSize = std::max(size, static_cast<VkDeviceSize>(16));
+
     VkBufferCreateInfo bufferInfo{};
     bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-    bufferInfo.size = size;
+    bufferInfo.size = allocSize;
     bufferInfo.usage = usage;
     bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 
@@ -81,6 +83,7 @@ void Buffer::Unmap() {
 }
 
 void Buffer::CopyToBuffer(const void* data, VkDeviceSize size, VkDeviceSize offset) {
+    if (!data || size == 0) return;
     if (offset + size > m_size) {
         LOG_ERROR("Buffer copy out of bounds");
         return;
@@ -96,6 +99,7 @@ void Buffer::CopyToBuffer(const void* data, VkDeviceSize size, VkDeviceSize offs
 }
 
 void Buffer::CopyBuffer(VulkanContext& context, VkBuffer srcBuffer, VkBuffer dstBuffer, VkDeviceSize size) {
+    if (!srcBuffer || !dstBuffer || size == 0) return;
     VkCommandPoolCreateInfo poolInfo{};
     poolInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
     poolInfo.flags = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT;

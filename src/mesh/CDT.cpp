@@ -29,14 +29,15 @@ void CDT::Triangulate2D(const std::vector<glm::vec2>& points,
 
     float dx = (maxP.x - minP.x) * 10.0f;
     float dy = (maxP.y - minP.y) * 10.0f;
-    float deltaMax = std::max(dx, dy);
+    float deltaMax = std::max({dx, dy, 20.0f});
     glm::vec2 mid = (minP + maxP) * 0.5f;
 
     std::vector<glm::vec2> superPts = points;
     uint32_t st0 = static_cast<uint32_t>(superPts.size());
-    superPts.push_back(mid + glm::vec2(-deltaMax, -deltaMax));
-    superPts.push_back(mid + glm::vec2(0.0f, deltaMax * 2.0f));
-    superPts.push_back(mid + glm::vec2(deltaMax * 2.0f, -deltaMax));
+    // CCW super-triangle enclosing bounding box
+    superPts.push_back(mid + glm::vec2(-deltaMax * 3.0f, -deltaMax));        // st0: bottom-left
+    superPts.push_back(mid + glm::vec2( deltaMax * 3.0f, -deltaMax));        // st1: bottom-right
+    superPts.push_back(mid + glm::vec2( 0.0f,             deltaMax * 3.0f)); // st2: top-center
 
     std::vector<CDT_Triangle> triangles;
     triangles.push_back({ st0, st0 + 1, st0 + 2 });

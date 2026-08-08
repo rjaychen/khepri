@@ -2,62 +2,89 @@
 #include "../core/Logger.h"
 #include <glm/gtc/matrix_transform.hpp>
 #include <chrono>
+#include <fstream>
+#include <imgui_internal.h>
+
+static void BuildDefaultDockLayout(ImGuiID dockspaceID) {
+    ImGui::DockBuilderRemoveNode(dockspaceID);
+    ImGui::DockBuilderAddNode(dockspaceID, ImGuiDockNodeFlags_DockSpace);
+    ImGui::DockBuilderSetNodeSize(dockspaceID, ImGui::GetMainViewport()->Size);
+
+    ImGuiID dockMain = dockspaceID;
+    ImGuiID dockLeft = ImGui::DockBuilderSplitNode(dockMain, ImGuiDir_Left, 0.22f, nullptr, &dockMain);
+    ImGuiID dockRight = ImGui::DockBuilderSplitNode(dockMain, ImGuiDir_Right, 0.25f, nullptr, &dockMain);
+    ImGuiID dockBottom = ImGui::DockBuilderSplitNode(dockMain, ImGuiDir_Down, 0.28f, nullptr, &dockMain);
+
+    ImGuiID dockRightTop = dockRight;
+    ImGuiID dockRightBottom = ImGui::DockBuilderSplitNode(dockRightTop, ImGuiDir_Down, 0.50f, nullptr, &dockRightTop);
+
+    // Left Panel: Mesh Generation Workbench
+    ImGui::DockBuilderDockWindow("Mesh Generation Workbench", dockLeft);
+
+    // Center Area: 3D Viewport
+    ImGui::DockBuilderDockWindow("3D Viewport", dockMain);
+
+    // Top Right Panel: Scene Hierarchy
+    ImGui::DockBuilderDockWindow("Scene Hierarchy", dockRightTop);
+
+    // Bottom Right Panel: Inspector & Vulkan Inspector
+    ImGui::DockBuilderDockWindow("Inspector", dockRightBottom);
+    ImGui::DockBuilderDockWindow("Vulkan Educational Inspector", dockRightBottom);
+
+    // Bottom Panel: Animation Timeline & Engine Log Console
+    ImGui::DockBuilderDockWindow("Animation Timeline", dockBottom);
+    ImGui::DockBuilderDockWindow("Engine Log Console", dockBottom);
+
+    ImGui::DockBuilderFinish(dockspaceID);
+}
+
+static void RenderEngineLogConsole() {
+    ImGui::Begin("Engine Log Console");
+    if (ImGui::Button("Clear Logs")) {
+        Logger::Get().ClearLogs();
+    }
+    ImGui::SameLine();
+    static bool autoScroll = true;
+    ImGui::Checkbox("Auto-scroll", &autoScroll);
+    ImGui::Separator();
+
+    ImGui::BeginChild("LogScrollRegion", ImVec2(0, 0), false, ImGuiWindowFlags_HorizontalScrollbar);
+    for (const auto& log : Logger::Get().GetLogs()) {
+        ImVec4 color(0.9f, 0.9f, 0.9f, 1.0f);
+        if (log.level == LogLevel::Warning) color = ImVec4(1.0f, 0.8f, 0.2f, 1.0f);
+        else if (log.level == LogLevel::Error) color = ImVec4(1.0f, 0.3f, 0.3f, 1.0f);
+        else if (log.level == LogLevel::VulkanDebug) color = ImVec4(0.4f, 0.7f, 1.0f, 1.0f);
+
+        ImGui::TextColored(color, "[%s] %s", log.timestamp.c_str(), log.message.c_str());
+    }
+    if (autoScroll && ImGui::GetScrollY() >= ImGui::GetScrollMaxY()) {
+        ImGui::SetScrollHereY(1.0f);
+    }
+    ImGui::EndChild();
+    ImGui::End();
+}
 
 struct PushConstants {
     glm::mat4 mvp;
     glm::mat4 model;
 };
 
-// Embedded SPIR-V for 3D Mesh Vertex Shader
-static const uint32_t vertShaderSPIRV[] = {
-    0x07230203,0x00010000,0x00080001,0x00000028,0x00000000,0x00020011,0x00000001,0x0006000b,
-    0x00000001,0x4c534c47,0x4c43532e,0x00000000,0x0003000e,0x00000000,0x00000001,0x0009000f,
-    0x00000000,0x00000004,0x6e69616d,0x00000000,0x0000000d,0x00000015,0x0000001d,0x00000022,
-    0x00030003,0x00000002,0x000001f4,0x00040005,0x00000004,0x6e69616d,0x00000000,0x00030005,
-    0x00000009,0x00000000,0x00050006,0x00000009,0x00000000,0x70766d00,0x00050006,0x00000009,
-    0x00000001,0x65646f6d,0x0000006c,0x00030005,0x0000000b,0x00000000,0x00040005,0x0000000d,
-    0x506e6900,0x69746973,0x00040005,0x00000015,0x6e696166,0x724e6700,0x00040005,0x0000001d,
-    0x4e6e6900,0x616d726f,0x00040005,0x00000022,0x6e696166,0x56556700,0x00040005,0x00000026,
-    0x556e6900,0x00000056,0x00050048,0x00000009,0x00000000,0x00000005,0x00000000,0x00050048,
-    0x00000009,0x00000001,0x00000005,0x00000040,0x00030047,0x00000009,0x00000002,0x00040047,
-    0x0000000d,0x0000001e,0x00000000,0x00040047,0x00000015,0x0000001e,0x00000000,0x00040047,
-    0x0000001d,0x0000001e,0x00000001,0x00040047,0x00000022,0x0000001e,0x00000001,0x00040047,
-    0x00000026,0x0000001e,0x00000003,0x00020013,0x00000002,0x00030021,0x00000003,0x00000002,
-    0x00030016,0x00000006,0x00000020,0x00040017,0x00000007,0x00000006,0x00000004,0x00040015,
-    0x00000008,0x00000020,0x00000000,0x00040018,0x00000009,0x00000007,0x00000004,0x0004001e,
-    0x0000000a,0x00000009,0x00000009,0x00040020,0x0000000b,0x00000009,0x0000000a,0x00040017,
-    0x0000000c,0x00000006,0x00000003,0x00040020,0x0000000e,0x00000001,0x0000000c,0x00040020,
-    0x0000000f,0x0000000b,0x00000009,0x00040015,0x00000010,0x00000020,0x00000001,0x0004002b,
-    0x00000010,0x00000011,0x00000000,0x00040017,0x00000014,0x00000006,0x00000003,0x00040020,
-    0x00000015,0x00000003,0x00000014,0x00040020,0x0000001d,0x00000001,0x00000014,0x00040017,
-    0x00000020,0x00000006,0x00000002,0x00040020,0x00000022,0x00000003,0x00000020,0x00040020,
-    0x00000026,0x00000001,0x00000020,0x00050036,0x00000002,0x00000004,0x00000000,0x00000003,
-    0x000200f8,0x00000005,0x0004003d,0x0000000c,0x0000000d,0x0000000e,0x0004003d,0x00000014,
-    0x00000015,0x0000001d,0x0004003d,0x00000020,0x00000021,0x00000026,0x000100fd,0x00010038
-};
-
-// Embedded SPIR-V for 3D Mesh Fragment Shader
-static const uint32_t fragShaderSPIRV[] = {
-    0x07230203,0x00010000,0x00080001,0x0000001e,0x00000000,0x00020011,0x00000001,0x0006000b,
-    0x00000001,0x4c534c47,0x4c43532e,0x00000000,0x0003000e,0x00000000,0x00000001,0x0007000f,
-    0x00000004,0x00000004,0x6e69616d,0x00000000,0x00000009,0x0000000d,0x00030010,0x00000004,
-    0x00000007,0x00040005,0x00000004,0x6e69616d,0x00000000,0x00040005,0x00000009,0x74754f6f,
-    0x726f6c6f,0x00040005,0x0000000d,0x6e696166,0x724e6700,0x00040047,0x00000009,0x0000001e,
-    0x00000000,0x00040047,0x0000000d,0x0000001e,0x00000000,0x00020013,0x00000002,0x00030021,
-    0x00000003,0x00000002,0x00030016,0x00000006,0x00000020,0x00040017,0x00000007,0x00000006,
-    0x00000004,0x00040020,0x00000008,0x00000003,0x00000007,0x00040020,0x0000000a,0x00000003,
-    0x00000006,0x00040017,0x0000000c,0x00000006,0x00000003,0x00040020,0x0000000d,0x00000001,
-    0x0000000c,0x0004002b,0x00000006,0x0000000e,0x3f000000,0x0004002b,0x00000006,0x0000000f,
-    0x3f800000,0x0004002b,0x00000006,0x00000010,0x3f333333,0x0005002c,0x0000000c,0x00000011,
-    0x0000000e,0x0000000f,0x00000010,0x0004002b,0x00000006,0x00000013,0x3e99999a,0x0004002b,
-    0x00000006,0x00000014,0x3f19999a,0x0004002b,0x00000006,0x00000015,0x3f666666,0x0005002c,
-    0x0000000c,0x00000016,0x00000013,0x00000014,0x00000015,0x00050036,0x00000002,0x00000004,
-    0x00000000,0x00000003,0x000200f8,0x00000005,0x0004003d,0x0000000c,0x0000000e,0x0000000d,
-    0x0005000c,0x0000000c,0x0000000f,0x0000000e,0x00000011,0x00050094,0x00000006,0x00000012,
-    0x0000000f,0x00000013,0x000500a3,0x00000006,0x00000014,0x00000012,0x00000013,0x0005008e,
-    0x0000000c,0x00000017,0x00000016,0x00000014,0x00060050,0x00000007,0x00000019,0x00000017,
-    0x0000000f,0x00000015,0x0004003e,0x00000009,0x00000019,0x000100fd,0x00010038
-};
+// -------------------------------------------------------
+// Shader loading helper
+// Reads a compiled .spv file from shaders/compiled/ next
+// to the executable (or relative to the working directory).
+// -------------------------------------------------------
+static std::vector<uint32_t> LoadSPIRV(const std::string& path) {
+    std::ifstream file(path, std::ios::ate | std::ios::binary);
+    if (!file.is_open()) {
+        throw std::runtime_error("Failed to open shader file: " + path);
+    }
+    size_t fileSize = static_cast<size_t>(file.tellg());
+    std::vector<uint32_t> buffer(fileSize / sizeof(uint32_t));
+    file.seekg(0);
+    file.read(reinterpret_cast<char*>(buffer.data()), fileSize);
+    return buffer;
+}
 
 EditorApp::EditorApp()
     : m_window(1280, 720, "Vulkan Graphics & Computational Geometry Engine Editor") {
@@ -91,15 +118,15 @@ EditorApp::EditorApp()
 EditorApp::~EditorApp() {
     m_context->WaitIdle();
 
+    ImGui_ImplVulkan_Shutdown();
+    ImGui_ImplGlfw_Shutdown();
+    ImGui::DestroyContext();
+
     if (m_imguiPool) vkDestroyDescriptorPool(m_context->GetDevice(), m_imguiPool, nullptr);
     if (m_commandPool) vkDestroyCommandPool(m_context->GetDevice(), m_commandPool, nullptr);
     if (m_graphicsPipeline) vkDestroyPipeline(m_context->GetDevice(), m_graphicsPipeline, nullptr);
     if (m_wireframePipeline) vkDestroyPipeline(m_context->GetDevice(), m_wireframePipeline, nullptr);
     if (m_pipelineLayout) vkDestroyPipelineLayout(m_context->GetDevice(), m_pipelineLayout, nullptr);
-
-    ImGui_ImplVulkan_Shutdown();
-    ImGui_ImplGlfw_Shutdown();
-    ImGui::DestroyContext();
 }
 
 void EditorApp::InitImGui() {
@@ -174,17 +201,26 @@ void EditorApp::CreateRenderPipeline() {
         LOG_ERROR("Failed to create pipeline layout!");
     }
 
-    std::vector<uint32_t> vCode(vertShaderSPIRV, vertShaderSPIRV + sizeof(vertShaderSPIRV) / sizeof(uint32_t));
-    std::vector<uint32_t> fCode(fragShaderSPIRV, fragShaderSPIRV + sizeof(fragShaderSPIRV) / sizeof(uint32_t));
+    // Load pre-compiled SPIR-V shaders (compiled from shaders/ by glslc via CMake)
+    // The shaders/compiled/ directory is relative to the working directory (engine root).
+    std::vector<uint32_t> vCode = LoadSPIRV("shaders/compiled/mesh.vert.spv");
+    std::vector<uint32_t> fCode = LoadSPIRV("shaders/compiled/mesh.frag.spv");
 
     VkShaderModule vertModule = PipelineBuilder::CreateShaderModule(*m_context, vCode);
     VkShaderModule fragModule = PipelineBuilder::CreateShaderModule(*m_context, fCode);
 
+    std::vector<VkVertexInputAttributeDescription> attribs = {
+        { 0, 0, VK_FORMAT_R32G32B32_SFLOAT, static_cast<uint32_t>(offsetof(Vertex, position)) },
+        { 1, 0, VK_FORMAT_R32G32B32_SFLOAT, static_cast<uint32_t>(offsetof(Vertex, normal)) },
+        { 2, 0, VK_FORMAT_R32G32_SFLOAT,    static_cast<uint32_t>(offsetof(Vertex, uv)) }
+    };
+
     PipelineBuilder builder;
     builder.SetShaders(vertModule, fragModule)
-           .SetVertexInput(Vertex::GetBindingDescriptions(), Vertex::GetAttributeDescriptions())
+           .SetVertexInput(Vertex::GetBindingDescriptions(), attribs)
            .SetColorAttachmentFormat(VK_FORMAT_R8G8B8A8_UNORM)
            .SetDepthFormat(VK_FORMAT_D32_SFLOAT)
+           .SetCullMode(VK_CULL_MODE_NONE, VK_FRONT_FACE_COUNTER_CLOCKWISE)
            .EnableDepthTest(true, VK_COMPARE_OP_LESS_OR_EQUAL);
 
     m_graphicsPipeline = builder.Build(*m_context, m_pipelineLayout);
@@ -258,7 +294,15 @@ void EditorApp::RenderViewportOffscreen(VkCommandBuffer cmd) {
     colorAttachment.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
     colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
     colorAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
-    colorAttachment.clearValue.color = { 0.1f, 0.12f, 0.15f, 1.0f };
+    colorAttachment.clearValue.color = { 0.12f, 0.14f, 0.18f, 1.0f };
+
+    VkRenderingAttachmentInfo depthAttachment{};
+    depthAttachment.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
+    depthAttachment.imageView = m_viewportPanel->GetDepthImageView();
+    depthAttachment.imageLayout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL;
+    depthAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+    depthAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+    depthAttachment.clearValue.depthStencil = { 1.0f, 0 };
 
     VkRenderingInfo renderingInfo{};
     renderingInfo.sType = VK_STRUCTURE_TYPE_RENDERING_INFO;
@@ -266,10 +310,13 @@ void EditorApp::RenderViewportOffscreen(VkCommandBuffer cmd) {
     renderingInfo.layerCount = 1;
     renderingInfo.colorAttachmentCount = 1;
     renderingInfo.pColorAttachments = &colorAttachment;
+    renderingInfo.pDepthAttachment = &depthAttachment;
 
     vkCmdBeginRendering(cmd, &renderingInfo);
 
     VkViewport viewport{};
+    viewport.x = 0.0f;
+    viewport.y = 0.0f;
     viewport.width = static_cast<float>(m_viewportPanel->GetWidth());
     viewport.height = static_cast<float>(m_viewportPanel->GetHeight());
     viewport.minDepth = 0.0f;
@@ -305,7 +352,27 @@ void EditorApp::RecordCommandBuffer(VkCommandBuffer cmd, uint32_t imageIndex) {
     // 1. Offscreen 3D Viewport Pass
     RenderViewportOffscreen(cmd);
 
-    // 2. ImGui Swapchain Pass
+    // 2. Transition swapchain image: UNDEFINED -> COLOR_ATTACHMENT_OPTIMAL
+    // Swapchain images are acquired in UNDEFINED layout and must be explicitly
+    // transitioned before we use them as a color attachment.
+    {
+        VkImageMemoryBarrier barrier{};
+        barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+        barrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+        barrier.newLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+        barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        barrier.image = m_swapchain->GetImages()[imageIndex];
+        barrier.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
+        barrier.srcAccessMask = 0;
+        barrier.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+        vkCmdPipelineBarrier(cmd,
+            VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+            VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+            0, 0, nullptr, 0, nullptr, 1, &barrier);
+    }
+
+    // 3. ImGui Swapchain Pass
     VkRenderingAttachmentInfo swapchainColorAttachment{};
     swapchainColorAttachment.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
     swapchainColorAttachment.imageView = m_swapchain->GetImageViews()[imageIndex];
@@ -324,6 +391,25 @@ void EditorApp::RecordCommandBuffer(VkCommandBuffer cmd, uint32_t imageIndex) {
     vkCmdBeginRendering(cmd, &renderingInfo);
     ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), cmd);
     vkCmdEndRendering(cmd);
+
+    // 4. Transition swapchain image: COLOR_ATTACHMENT_OPTIMAL -> PRESENT_SRC_KHR
+    // Must be in PRESENT_SRC_KHR layout before vkQueuePresentKHR.
+    {
+        VkImageMemoryBarrier barrier{};
+        barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+        barrier.oldLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+        barrier.newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+        barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        barrier.image = m_swapchain->GetImages()[imageIndex];
+        barrier.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
+        barrier.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+        barrier.dstAccessMask = 0;
+        vkCmdPipelineBarrier(cmd,
+            VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+            VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
+            0, 0, nullptr, 0, nullptr, 1, &barrier);
+    }
 
     vkEndCommandBuffer(cmd);
 }
@@ -355,14 +441,30 @@ void EditorApp::Run() {
         ImGui_ImplGlfw_NewFrame();
         ImGui::NewFrame();
 
-        ImGui::DockSpaceOverViewport(0, ImGui::GetMainViewport());
+        ImGuiID dockspaceID = ImGui::DockSpaceOverViewport(0, ImGui::GetMainViewport());
+        static bool firstFrame = true;
+        if (firstFrame) {
+            firstFrame = false;
+            BuildDefaultDockLayout(dockspaceID);
+        }
 
         // Render UI Panels
+        VkImageView prevView = m_viewportPanel->GetColorImageView();
         m_viewportPanel->RenderUI(m_camera, m_viewportDS);
+        if (m_viewportPanel->GetColorImageView() != prevView) {
+            // Framebuffer was recreated — update ImGui texture descriptor
+            m_context->WaitIdle();
+            m_viewportDS = ImGui_ImplVulkan_AddTexture(
+                m_viewportPanel->GetSampler(),
+                m_viewportPanel->GetColorImageView(),
+                VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+            );
+        }
         m_sceneTreePanel->RenderUI(m_rootNode.get());
         m_timelinePanel->RenderUI(m_timeline);
         m_meshLabPanel->RenderUI(m_activeDisplayMesh);
         m_vulkanInspectorPanel->RenderUI(*m_swapchain);
+        RenderEngineLogConsole();
 
         ImGui::Render();
 
@@ -374,7 +476,7 @@ void EditorApp::Run() {
         VkSubmitInfo submitInfo{};
         submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
 
-        VkSemaphore waitSemaphores[] = { m_swapchain->GetImageAvailableSemaphore(currentFrame) };
+        VkSemaphore waitSemaphores[] = { m_swapchain->GetImageAvailableSemaphore(imageIndex) };
         VkPipelineStageFlags waitStages[] = { VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT };
         submitInfo.waitSemaphoreCount = 1;
         submitInfo.pWaitSemaphores = waitSemaphores;
@@ -383,14 +485,11 @@ void EditorApp::Run() {
         submitInfo.commandBufferCount = 1;
         submitInfo.pCommandBuffers = &cmd;
 
-        VkSemaphore signalSemaphores[] = { m_swapchain->GetRenderFinishedSemaphore(currentFrame) };
+        VkSemaphore signalSemaphores[] = { m_swapchain->GetRenderFinishedSemaphore(imageIndex) };
         submitInfo.signalSemaphoreCount = 1;
         submitInfo.pSignalSemaphores = signalSemaphores;
 
-        VkFence inFlightFence = m_swapchain->GetInFlightFence(currentFrame);
-        vkResetFences(m_context->GetDevice(), 1, &inFlightFence);
-
-        if (vkQueueSubmit(m_context->GetGraphicsQueue(), 1, &submitInfo, inFlightFence) != VK_SUCCESS) {
+        if (vkQueueSubmit(m_context->GetGraphicsQueue(), 1, &submitInfo, m_swapchain->GetInFlightFence(currentFrame)) != VK_SUCCESS) {
             LOG_ERROR("Failed to submit draw command buffer!");
         }
 

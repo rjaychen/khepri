@@ -293,12 +293,9 @@ void VulkanContext::CreateLogicalDevice() {
     createInfo.enabledExtensionCount = static_cast<uint32_t>(m_deviceExtensions.size());
     createInfo.ppEnabledExtensionNames = m_deviceExtensions.data();
 
-    if (m_enableValidationLayers) {
-        createInfo.enabledLayerCount = static_cast<uint32_t>(m_validationLayers.size());
-        createInfo.ppEnabledLayerNames = m_validationLayers.data();
-    } else {
-        createInfo.enabledLayerCount = 0;
-    }
+    // Device layers are deprecated since Vulkan 1.0 and forbidden by spec (VUID-VkDeviceCreateInfo-enabledLayerCount-12384).
+    // Only instance layers should be used. Always set to 0 here.
+    createInfo.enabledLayerCount = 0;
 
     if (vkCreateDevice(m_physicalDevice, &createInfo, nullptr, &m_device) != VK_SUCCESS) {
         LOG_ERROR("Failed to create logical device");

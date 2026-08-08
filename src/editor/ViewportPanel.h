@@ -21,8 +21,10 @@ public:
     bool IsHovered() const { return m_isHovered; }
 
     VkImageView GetColorImageView() const { return m_colorImageView; }
+    VkImageView GetDepthImageView() const { return m_depthImageView; }
     VkSampler GetSampler() const { return m_sampler; }
     VkImage GetColorImage() const { return m_colorImage; }
+    VkImage GetDepthImage() const { return m_depthImage; }
 
     void TransitionToShaderRead(VkCommandBuffer cmd);
     void TransitionToColorAttachment(VkCommandBuffer cmd);

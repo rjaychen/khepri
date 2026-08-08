@@ -5,6 +5,11 @@
 MeshComponent::MeshComponent(VulkanContext& context, const std::vector<Vertex>& vertices, const std::vector<uint32_t>& indices)
     : m_context(context), m_vertices(vertices), m_indices(indices) {
     
+    if (vertices.empty() || indices.empty()) {
+        LOG_WARN("MeshComponent initialized with empty vertex/index data");
+        return;
+    }
+
     VkDeviceSize vertexSize = sizeof(Vertex) * vertices.size();
     VkDeviceSize indexSize = sizeof(uint32_t) * indices.size();
 
@@ -34,6 +39,7 @@ MeshComponent::MeshComponent(VulkanContext& context, const std::vector<Vertex>& 
 }
 
 void MeshComponent::Draw(VkCommandBuffer cmd) const {
+    if (!m_vertexBuffer || !m_indexBuffer || m_indices.empty()) return;
     VkBuffer vertexBuffers[] = { m_vertexBuffer->GetBuffer() };
     VkDeviceSize offsets[] = { 0 };
     vkCmdBindVertexBuffers(cmd, 0, 1, vertexBuffers, offsets);
