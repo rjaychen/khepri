@@ -6,11 +6,12 @@
 #include <string>
 #include "VulkanContext.h"
 #include "Descriptors.h"
+#include "../scene/Light.h"
 
 class Texture {
 public:
     Texture(VulkanContext& context, uint32_t width, uint32_t height, const unsigned char* pixels,
-            VkDescriptorSetLayout setLayout, DescriptorAllocator& allocator);
+            VkDescriptorSetLayout setLayout, DescriptorAllocator& allocator, VkBuffer lightUBOBuffer = VK_NULL_HANDLE);
     ~Texture();
 
     Texture(const Texture&) = delete;
@@ -25,17 +26,17 @@ public:
     uint32_t GetHeight() const { return m_height; }
 
     static std::shared_ptr<Texture> CreateFromMemory(VulkanContext& context, const uint8_t* data, size_t size,
-                                                      VkDescriptorSetLayout setLayout, DescriptorAllocator& allocator);
+                                                      VkDescriptorSetLayout setLayout, DescriptorAllocator& allocator, VkBuffer lightUBOBuffer = VK_NULL_HANDLE);
     static std::shared_ptr<Texture> CreateFromFile(VulkanContext& context, const std::string& filepath,
-                                                    VkDescriptorSetLayout setLayout, DescriptorAllocator& allocator);
+                                                    VkDescriptorSetLayout setLayout, DescriptorAllocator& allocator, VkBuffer lightUBOBuffer = VK_NULL_HANDLE);
     static std::shared_ptr<Texture> CreateWhiteTexture(VulkanContext& context,
-                                                       VkDescriptorSetLayout setLayout, DescriptorAllocator& allocator);
+                                                       VkDescriptorSetLayout setLayout, DescriptorAllocator& allocator, VkBuffer lightUBOBuffer = VK_NULL_HANDLE);
 
 private:
     void CreateTextureImage(const unsigned char* pixels);
     void CreateImageView();
     void CreateSampler();
-    void CreateDescriptorSet(VkDescriptorSetLayout setLayout, DescriptorAllocator& allocator);
+    void CreateDescriptorSet(VkDescriptorSetLayout setLayout, DescriptorAllocator& allocator, VkBuffer lightUBOBuffer);
 
     VulkanContext& m_context;
     uint32_t m_width = 0;

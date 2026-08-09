@@ -1,6 +1,6 @@
 #include "TimelinePanel.h"
 
-void TimelinePanel::RenderUI(Timeline& timeline) {
+void TimelinePanel::RenderUI(Timeline& timeline, SceneNode* selectedNode, SceneNode* rootSceneNode) {
     ImGui::Begin("Animation Timeline");
 
     bool isPlaying = timeline.IsPlaying();
@@ -26,7 +26,27 @@ void TimelinePanel::RenderUI(Timeline& timeline) {
     ImGui::Text("Time: %.2f / %.2f s", currentTime, duration);
 
     if (ImGui::SliderFloat("Playhead", &currentTime, 0.0f, duration, "%.2f s")) {
-        timeline.SetCurrentTime(currentTime);
+        timeline.SetCurrentTime(currentTime, rootSceneNode);
+    }
+
+    ImGui::Separator();
+
+    // Keyframing controls
+    if (selectedNode) {
+        ImGui::TextColored(ImVec4(0.4f, 0.8f, 1.0f, 1.0f), "Selected Target: %s", selectedNode->name.c_str());
+        if (ImGui::Button("Keyframe Current Pose")) {
+            timeline.KeyframeNodePose(selectedNode);
+        }
+    } else {
+        ImGui::TextDisabled("Select a node in Scene Hierarchy to keyframe pose");
+    }
+
+    ImGui::SameLine();
+    if (ImGui::Button("New Clip")) {
+        auto newClip = std::make_shared<AnimationClip>();
+        newClip->name = "New Animation Clip";
+        newClip->duration = 5.0f;
+        timeline.SetClip(newClip);
     }
 
     ImGui::Separator();
@@ -34,13 +54,35 @@ void TimelinePanel::RenderUI(Timeline& timeline) {
 
     auto clip = timeline.GetCurrentClip();
     if (clip) {
-        for (const auto& track : clip->tracks) {
+        for (size_t trackIdx = 0; trackIdx < clip->tracks.size(); ++trackIdx) {
+            auto& track = clip->tracks[trackIdx];
+            ImGui::PushID(static_cast<int>(trackIdx));
             if (ImGui::TreeNode(track.targetNodeName.c_str())) {
-                ImGui::Text("Position Keys: %d", (int)track.positionKeys.size());
-                ImGui::Text("Rotation Keys: %d", (int)track.rotationKeys.size());
-                ImGui::Text("Scale Keys: %d", (int)track.scaleKeys.size());
+                if (ImGui::TreeNode("Position Keyframes")) {
+                    for (size_t kIdx = 0; kIdx < track.positionKeys.size(); ++kIdx) {
+                        auto& k = track.positionKeys[kIdx];
+                        ImGui::BulletText("t=%.2fs | Pos: (%.2f, %.2f, %.2f)", k.time, k.value.x, k.value.y, k.value.z);
+                    }
+                    ImGui::TreePop();
+                }
+                if (ImGui::TreeNode("Rotation Keyframes")) {
+                    for (size_t kIdx = 0; kIdx < track.rotationKeys.size(); ++kIdx) {
+                        auto& k = track.rotationKeys[kIdx];
+                        glm::vec3 euler = glm::degrees(glm::eulerAngles(k.value));
+                        ImGui::BulletText("t=%.2fs | Rot: (%.1f°, %.1f°, %.1f°)", k.time, euler.x, euler.y, euler.z);
+                    }
+                    ImGui::TreePop();
+                }
+                if (ImGui::TreeNode("Scale Keyframes")) {
+                    for (size_t kIdx = 0; kIdx < track.scaleKeys.size(); ++kIdx) {
+                        auto& k = track.scaleKeys[kIdx];
+                        ImGui::BulletText("t=%.2fs | Scale: (%.2f, %.2f, %.2f)", k.time, k.value.x, k.value.y, k.value.z);
+                    }
+                    ImGui::TreePop();
+                }
                 ImGui::TreePop();
             }
+            ImGui::PopID();
         }
     } else {
         ImGui::TextDisabled("No Animation Clip Loaded");

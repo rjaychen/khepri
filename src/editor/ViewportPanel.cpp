@@ -91,31 +91,28 @@ void ViewportPanel::CreateFramebuffer(uint32_t width, uint32_t height) {
     vkCreateImageView(m_context.GetDevice(), &viewInfo, nullptr, &m_depthImageView);
 }
 
-void ViewportPanel::RenderUI(Camera& camera, VkDescriptorSet& viewportTextureDS, float deltaTime, const MeshComponent* activeMesh, const SceneNode* rootNode) {
+void ViewportPanel::RenderUI(Camera& camera, VkDescriptorSet& viewportTextureDS, float deltaTime, const SceneNode* selectedNode, const SceneNode* rootNode) {
+    (void)rootNode;
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(4, 4));
     ImGui::Begin("3D Viewport", nullptr, ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
 
     m_isFocused = ImGui::IsWindowFocused();
     m_isHovered = ImGui::IsWindowHovered();
 
-    auto focusOnMesh = [&]() {
-        glm::vec3 targetPos(0.0f);
-        float distance = 4.0f;
-        if (activeMesh) {
-            targetPos = activeMesh->GetBoundingBoxCenter();
-            distance = std::max(1.5f, activeMesh->GetBoundingBoxRadius() * 2.5f);
-            if (rootNode) {
-                targetPos = glm::vec3(rootNode->GetWorldTransform() * glm::vec4(targetPos, 1.0f));
-            }
-        }
-        camera.FocusOnTarget(targetPos, distance);
+    auto focusOnNode = [&]() {
+        camera.FocusOnNode(selectedNode);
     };
+
+    // Global 'F' key shortcut to focus selected node
+    if (ImGui::IsKeyPressed(ImGuiKey_F) && (m_isFocused || m_isHovered)) {
+        focusOnNode();
+    }
 
     // Top Viewport Control Bar
     ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(6, 3));
     ImGui::BeginGroup();
-    ImGui::TextColored(ImVec4(0.3f, 0.8f, 1.0f, 1.0f), "🎮 Unreal Flycam Controls:"); ImGui::SameLine();
-    ImGui::TextDisabled("(Hold RMB + WASDQE to Fly | Scroll wheel to adjust speed)"); ImGui::SameLine();
+    ImGui::TextColored(ImVec4(0.3f, 0.8f, 1.0f, 1.0f), "📷 Camera Controls:"); ImGui::SameLine();
+    ImGui::TextDisabled("(Hold RMB + WASDQE / Mouse Drag to Navigate | Press F to Focus)"); ImGui::SameLine();
 
     ImGui::SetNextItemWidth(100);
     float flySpeed = camera.GetFlySpeed();
@@ -124,28 +121,86 @@ void ViewportPanel::RenderUI(Camera& camera, VkDescriptorSet& viewportTextureDS,
     }
 
     ImGui::SameLine();
-    if (ImGui::Button("Reset View (F)")) {
-        focusOnMesh();
+    if (ImGui::Button("Focus Selected (F)")) {
+        focusOnNode();
     }
+
+    ImGui::SameLine();
+    ImGui::SetNextItemWidth(170.0f);
+    const char* resModes[] = {
+        "Auto (Fit Panel)",
+        "0.5x Scale",
+        "0.75x Scale",
+        "1.0x Scale (Native)",
+        "1.5x Scale (Supersample)",
+        "2.0x Scale (2x DSR)",
+        "Fixed 1280x720 (720p)",
+        "Fixed 1920x1080 (1080p)",
+        "Fixed 2560x1440 (1440p)"
+    };
+    int currentMode = static_cast<int>(m_resMode);
+    if (ImGui::Combo("##ViewportResCombo", &currentMode, resModes, IM_ARRAYSIZE(resModes))) {
+        m_resMode = static_cast<ResolutionMode>(currentMode);
+    }
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip("Select 3D Viewport offscreen render resolution & supersampling mode");
+    }
+
+    ImGui::SameLine();
+    ImGui::TextColored(ImVec4(0.5f, 0.9f, 0.5f, 1.0f), "[%ux%u px]", m_width, m_height);
     ImGui::EndGroup();
     ImGui::PopStyleVar();
     ImGui::Separator();
 
     ImVec2 viewportSize = ImGui::GetContentRegionAvail();
     if (viewportSize.x > 0.0f && viewportSize.y > 0.0f) {
-        if ((uint32_t)viewportSize.x != m_width || (uint32_t)viewportSize.y != m_height) {
-            // Correct GPU-safe DS lifecycle order:
-            //  1. CreateFramebuffer -> calls WaitIdle internally -> GPU is idle,
-            //     old VkImage + VkImageView are destroyed safely inside.
-            //  2. RemoveTexture on OLD DS -> vkFreeDescriptorSets -> safe now GPU is idle.
-            //  3. AddTexture with new VkImageView -> fresh, valid DS for ImGui::Image.
-            // WRONG order was: RemoveTexture first (GPU still using the DS) -> then WaitIdle.
+        uint32_t targetWidth = static_cast<uint32_t>(viewportSize.x);
+        uint32_t targetHeight = static_cast<uint32_t>(viewportSize.y);
+
+        switch (m_resMode) {
+            case ResolutionMode::FitPanel:
+                break;
+            case ResolutionMode::Scale50:
+                targetWidth = std::max(1u, static_cast<uint32_t>(viewportSize.x * 0.50f));
+                targetHeight = std::max(1u, static_cast<uint32_t>(viewportSize.y * 0.50f));
+                break;
+            case ResolutionMode::Scale75:
+                targetWidth = std::max(1u, static_cast<uint32_t>(viewportSize.x * 0.75f));
+                targetHeight = std::max(1u, static_cast<uint32_t>(viewportSize.y * 0.75f));
+                break;
+            case ResolutionMode::Scale100:
+                targetWidth = static_cast<uint32_t>(viewportSize.x);
+                targetHeight = static_cast<uint32_t>(viewportSize.y);
+                break;
+            case ResolutionMode::Scale150:
+                targetWidth = static_cast<uint32_t>(viewportSize.x * 1.50f);
+                targetHeight = static_cast<uint32_t>(viewportSize.y * 1.50f);
+                break;
+            case ResolutionMode::Scale200:
+                targetWidth = static_cast<uint32_t>(viewportSize.x * 2.00f);
+                targetHeight = static_cast<uint32_t>(viewportSize.y * 2.00f);
+                break;
+            case ResolutionMode::Fixed720p:
+                targetWidth = 1280;
+                targetHeight = 720;
+                break;
+            case ResolutionMode::Fixed1080p:
+                targetWidth = 1920;
+                targetHeight = 1080;
+                break;
+            case ResolutionMode::Fixed1440p:
+                targetWidth = 2560;
+                targetHeight = 1440;
+                break;
+        }
+
+        if (targetWidth != m_width || targetHeight != m_height) {
             VkDescriptorSet oldDS = viewportTextureDS;
             viewportTextureDS = VK_NULL_HANDLE;
-            CreateFramebuffer((uint32_t)viewportSize.x, (uint32_t)viewportSize.y);
-            camera.SetViewportSize(viewportSize.x, viewportSize.y);
+            CreateFramebuffer(targetWidth, targetHeight);
+            camera.SetViewportSize(static_cast<float>(targetWidth), static_cast<float>(targetHeight));
             if (oldDS != VK_NULL_HANDLE) {
-                ImGui_ImplVulkan_RemoveTexture(oldDS);  // GPU is now idle - safe
+                ImGui_ImplVulkan_RemoveTexture(oldDS);
             }
             viewportTextureDS = ImGui_ImplVulkan_AddTexture(
                 m_sampler,
@@ -161,7 +216,7 @@ void ViewportPanel::RenderUI(Camera& camera, VkDescriptorSet& viewportTextureDS,
 
     // Hotkey Focus ('F')
     if ((m_isFocused || m_isHovered) && ImGui::IsKeyPressed(ImGuiKey_F)) {
-        focusOnMesh();
+        focusOnNode();
     }
 
     // Unreal Engine Camera Controls (RMB Fly/Look, RMB+LMB / MMB Pan, LMB Orbit, WASDQE Fly)
@@ -169,7 +224,7 @@ void ViewportPanel::RenderUI(Camera& camera, VkDescriptorSet& viewportTextureDS,
     bool lmbDown = ImGui::IsMouseDown(ImGuiMouseButton_Left);
     bool mmbDown = ImGui::IsMouseDown(ImGuiMouseButton_Middle);
 
-    if (m_isHovered || m_isFocused) {
+    if ((m_isHovered || m_isFocused) && !ImGui::IsAnyItemActive()) {
         if (rmbDown && lmbDown) {
             // RMB + LMB Drag: Viewplane Pan (Unreal Engine standard)
             ImVec2 delta = ImGui::GetMouseDragDelta(ImGuiMouseButton_Right);

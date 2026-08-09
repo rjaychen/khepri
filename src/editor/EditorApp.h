@@ -10,6 +10,8 @@
 #include "../scene/Camera.h"
 #include "../scene/SceneNode.h"
 #include "../scene/MeshComponent.h"
+#include "../scene/Light.h"
+#include "../vulkan/Buffer.h"
 #include "../animation/Timeline.h"
 #include "ViewportPanel.h"
 #include "SceneTreePanel.h"
@@ -48,14 +50,14 @@ private:
     void RenderMainMenuBar(ImGuiID dockspaceID);
     void ApplyDockLayout(ImGuiID dockspaceID);
 
-    // Recursively walks the scene graph and draws each node's mesh
-    // with the correct world transform push constant.
+    void UpdateLightUBO();
     void DrawSceneNode(VkCommandBuffer cmd, SceneNode* node, const glm::mat4& parentTransform);
 
     Window m_window;
     std::unique_ptr<VulkanContext> m_context;
     std::unique_ptr<Swapchain> m_swapchain;
     std::unique_ptr<DescriptorAllocator> m_descriptorAllocator;
+    std::unique_ptr<Buffer> m_lightUBOBuffer;
 
     VkDescriptorPool m_imguiPool = VK_NULL_HANDLE;
 
@@ -75,6 +77,7 @@ private:
     Camera m_camera;
     std::shared_ptr<SceneNode> m_rootNode;
     std::shared_ptr<MeshComponent> m_activeDisplayMesh; // tracked for inspector/camera focus
+    std::shared_ptr<MeshComponent> m_lightGizmoMesh;    // shared gizmo for light visualization
     Timeline m_timeline;
 
     // Viewport Texture Descriptor Set for ImGui (owned & updated by ViewportPanel::RenderUI)

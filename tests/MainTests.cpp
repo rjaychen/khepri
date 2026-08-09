@@ -1,10 +1,44 @@
 #include <gtest/gtest.h>
+#include <gmock/gmock.h>
 #include "core/Version.h"
 #include "core/Logger.h"
+#include "scene/Camera.h"
 #include "scene/SceneNode.h"
+#include "scene/LightComponent.h"
 #include "animation/Timeline.h"
 #include "mesh/ExactPredicates.h"
+#include "mesh/HalfEdgeMesh.h"
 #include <glm/gtc/epsilon.hpp>
+
+// ---------------------------------------------------------------------------
+// Camera Focus Unit Tests (Google Mock & Google Test)
+// ---------------------------------------------------------------------------
+TEST(CameraFocusTest, FocusOnNodeNullptrResetsToOrigin) {
+    Camera camera(glm::vec3(0.0f, 0.0f, 10.0f), glm::vec3(0.0f));
+    camera.FocusOnNode(nullptr);
+
+    EXPECT_NEAR(camera.GetTarget().x, 0.0f, 1e-4f);
+    EXPECT_NEAR(camera.GetTarget().y, 0.0f, 1e-4f);
+    EXPECT_NEAR(camera.GetTarget().z, 0.0f, 1e-4f);
+    EXPECT_NEAR(camera.GetDistance(), 4.0f, 1e-4f);
+}
+
+TEST(CameraFocusTest, FocusOnNodeCentersOnWorldTransform) {
+    auto parent = std::make_shared<SceneNode>("ParentNode");
+    parent->position = glm::vec3(12.0f, 4.0f, -8.0f);
+
+    auto child = std::make_unique<SceneNode>("SelectedChildNode");
+    child->position = glm::vec3(1.0f, 2.0f, 3.0f);
+    SceneNode* targetNode = parent->AddChild(std::move(child));
+
+    Camera camera;
+    camera.FocusOnNode(targetNode);
+
+    // Target position should equal world position of child (13.0, 6.0, -5.0)
+    EXPECT_NEAR(camera.GetTarget().x, 13.0f, 1e-4f);
+    EXPECT_NEAR(camera.GetTarget().y, 6.0f, 1e-4f);
+    EXPECT_NEAR(camera.GetTarget().z, -5.0f, 1e-4f);
+}
 
 // ---------------------------------------------------------------------------
 // 1. Engine Versioning Test Suite
@@ -13,7 +47,38 @@ TEST(EngineVersionTest, ValidatesInitialSemanticVersion) {
     EXPECT_EQ(KhepriEngine::VERSION_MAJOR, 0);
     EXPECT_EQ(KhepriEngine::VERSION_MINOR, 1);
     EXPECT_GE(KhepriEngine::VERSION_PATCH, 0);
-    EXPECT_STREQ(KhepriEngine::VERSION_STRING, "0.1.0");
+    EXPECT_STREQ(KhepriEngine::VERSION_STRING, "0.1.1");
+}
+
+// ---------------------------------------------------------------------------
+// Dynamic Light Node Test Suite
+// ---------------------------------------------------------------------------
+TEST(LightNodeTest, LightComponentEncodesGPUDataCorrectly) {
+    LightComponent pointLight(LightType::Point);
+    pointLight.color = glm::vec3(1.0f, 0.5f, 0.2f);
+    pointLight.intensity = 2.5f;
+    pointLight.constantAttenuation = 1.0f;
+    pointLight.linearAttenuation = 0.09f;
+    pointLight.quadraticAttenuation = 0.032f;
+
+    glm::vec3 worldPos(3.0f, 4.0f, 5.0f);
+    glm::vec3 worldDir(0.0f, -1.0f, 0.0f);
+
+    LightData gpuData = pointLight.GetGPUData(worldPos, worldDir);
+
+    EXPECT_NEAR(gpuData.position.x, 3.0f, 1e-4f);
+    EXPECT_NEAR(gpuData.position.y, 4.0f, 1e-4f);
+    EXPECT_NEAR(gpuData.position.z, 5.0f, 1e-4f);
+    EXPECT_NEAR(gpuData.position.w, 1.0f, 1e-4f); // LightType::Point = 1.0
+
+    EXPECT_NEAR(gpuData.color.r, 1.0f, 1e-4f);
+    EXPECT_NEAR(gpuData.color.g, 0.5f, 1e-4f);
+    EXPECT_NEAR(gpuData.color.b, 0.2f, 1e-4f);
+    EXPECT_NEAR(gpuData.color.a, 2.5f, 1e-4f);   // intensity = 2.5
+
+    EXPECT_NEAR(gpuData.params.x, 1.0f, 1e-4f);   // constant
+    EXPECT_NEAR(gpuData.params.y, 0.09f, 1e-4f);  // linear
+    EXPECT_NEAR(gpuData.params.z, 0.032f, 1e-4f); // quadratic
 }
 
 // ---------------------------------------------------------------------------
@@ -130,4 +195,30 @@ TEST(LoggerTest, RecordsAndClearsLogEntries) {
 
     Logger::Get().ClearLogs();
     EXPECT_EQ(Logger::Get().GetLogs().size(), 0u);
+}
+
+// ---------------------------------------------------------------------------
+// 6. Pose Keyframing & Half-Edge Mesh Baking Test Suite
+// ---------------------------------------------------------------------------
+TEST(AnimationTimelineTest, KeyframeNodePoseCapturesTransform) {
+    Timeline timeline;
+    auto clip = std::make_shared<AnimationClip>();
+    clip->duration = 5.0f;
+    timeline.SetClip(clip);
+
+    SceneNode node("TestNode");
+    node.position = glm::vec3(3.0f, 4.0f, 5.0f);
+    node.rotationDegrees = glm::vec3(0.0f, 90.0f, 0.0f);
+    node.scale = glm::vec3(2.0f, 2.0f, 2.0f);
+
+    timeline.SetCurrentTime(1.5f);
+    timeline.KeyframeNodePose(&node);
+
+    const auto currentClip = timeline.GetCurrentClip();
+    ASSERT_NE(currentClip, nullptr);
+    EXPECT_EQ(currentClip->tracks.size(), 1u);
+    EXPECT_EQ(currentClip->tracks[0].targetNodeName, "TestNode");
+    EXPECT_EQ(currentClip->tracks[0].positionKeys.size(), 1u);
+    EXPECT_NEAR(currentClip->tracks[0].positionKeys[0].time, 1.5f, 1e-4f);
+    EXPECT_NEAR(currentClip->tracks[0].positionKeys[0].value.x, 3.0f, 1e-4f);
 }

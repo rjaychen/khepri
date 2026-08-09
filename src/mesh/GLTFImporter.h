@@ -14,7 +14,8 @@ public:
     // Loads a glTF (.gltf or .glb) file into a SceneNode containing MeshComponent primitives
     static std::shared_ptr<SceneNode> LoadFromFile(VulkanContext& context, const std::string& filepath,
                                                    VkDescriptorSetLayout setLayout = VK_NULL_HANDLE,
-                                                   DescriptorAllocator* allocator = nullptr);
+                                                   DescriptorAllocator* allocator = nullptr,
+                                                   VkBuffer lightUBOBuffer = VK_NULL_HANDLE);
 
     // Creates sample primitive meshes for instant loading
     static std::shared_ptr<MeshComponent> CreateSampleMesh(VulkanContext& context, const std::string& primitiveName);

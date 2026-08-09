@@ -2,6 +2,7 @@
 
 #include <volk.h>
 #include <vector>
+#include <deque>
 #include <unordered_map>
 #include <memory>
 #include "VulkanContext.h"
@@ -39,6 +40,6 @@ public:
 
 private:
     std::vector<VkWriteDescriptorSet> m_writes;
-    std::vector<VkDescriptorBufferInfo> m_bufferInfos;
-    std::vector<VkDescriptorImageInfo> m_imageInfos;
+    std::deque<VkDescriptorBufferInfo> m_bufferInfos;
+    std::deque<VkDescriptorImageInfo> m_imageInfos;
 };

@@ -1,4 +1,5 @@
 #include "Camera.h"
+#include "SceneNode.h"
 #include <algorithm>
 
 Camera::Camera(glm::vec3 eye, glm::vec3 target)
@@ -103,6 +104,25 @@ void Camera::FocusOnTarget(glm::vec3 target, float distance) {
     m_target = target;
     m_distance = std::max(0.5f, distance);
     UpdateVectors();
+}
+
+void Camera::FocusOnNode(const SceneNode* node) {
+    if (!node) {
+        FocusOnTarget(glm::vec3(0.0f), 4.0f);
+        return;
+    }
+
+    glm::mat4 worldMat = node->GetWorldTransform();
+    glm::vec3 worldPos = glm::vec3(worldMat[3]);
+    float distance = 3.5f;
+
+    if (node->mesh) {
+        glm::vec3 localCenter = node->mesh->GetBoundingBoxCenter();
+        worldPos = glm::vec3(worldMat * glm::vec4(localCenter, 1.0f));
+        distance = std::max(1.5f, node->mesh->GetBoundingBoxRadius() * 2.5f);
+    }
+
+    FocusOnTarget(worldPos, distance);
 }
 
 void Camera::UpdateVectors() {

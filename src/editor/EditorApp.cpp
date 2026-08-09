@@ -36,9 +36,19 @@ void EditorApp::SetEditorMode(EditorMode mode) {
 
 void EditorApp::LoadGLTFModel(const std::string& path) {
     m_context->WaitIdle();
-    auto loadedNode = GLTFImporter::LoadFromFile(*m_context, path, m_textureDescriptorSetLayout, m_descriptorAllocator.get());
+    VkBuffer lightBuf = m_lightUBOBuffer ? m_lightUBOBuffer->GetBuffer() : VK_NULL_HANDLE;
+    auto loadedNode = GLTFImporter::LoadFromFile(*m_context, path, m_textureDescriptorSetLayout, m_descriptorAllocator.get(), lightBuf);
     if (loadedNode) {
         m_rootNode = loadedNode;
+
+        // Ensure scene root has a default sun light
+        auto sunNode = std::make_unique<SceneNode>("Sun / Main Light");
+        sunNode->position = glm::vec3(5.0f, 10.0f, 5.0f);
+        sunNode->rotationDegrees = glm::vec3(-45.0f, 45.0f, 0.0f);
+        sunNode->lightComponent = std::make_shared<LightComponent>(LightType::Directional);
+        sunNode->lightComponent->color = glm::vec3(1.0f, 0.95f, 0.85f);
+        m_rootNode->AddChild(std::move(sunNode));
+
         const auto& children = m_rootNode->GetChildren();
         if (!children.empty() && children[0]->mesh) {
             m_activeDisplayMesh = children[0]->mesh;
@@ -98,6 +108,21 @@ void EditorApp::RenderMainMenuBar(ImGuiID dockspaceID) {
             }
             if (ImGui::MenuItem("Reset Layout")) {
                 m_rebuildLayout = true;
+            }
+            if (ImGui::BeginMenu("Set Application Resolution")) {
+                if (ImGui::MenuItem("1280 x 720 (720p HD)")) {
+                    glfwSetWindowSize(m_window.GetNativeWindow(), 1280, 720);
+                }
+                if (ImGui::MenuItem("1600 x 900 (900p HD+)")) {
+                    glfwSetWindowSize(m_window.GetNativeWindow(), 1600, 900);
+                }
+                if (ImGui::MenuItem("1920 x 1080 (1080p Full HD)")) {
+                    glfwSetWindowSize(m_window.GetNativeWindow(), 1920, 1080);
+                }
+                if (ImGui::MenuItem("2560 x 1440 (1440p QHD)")) {
+                    glfwSetWindowSize(m_window.GetNativeWindow(), 2560, 1440);
+                }
+                ImGui::EndMenu();
             }
             ImGui::EndMenu();
         }
@@ -185,8 +210,10 @@ struct PushConstants {
     glm::mat4 mvp;
     glm::mat4 model;
     glm::vec4 baseColorFactor{1.0f, 1.0f, 1.0f, 1.0f};
-    int useTexture = 0;
-    int padding[3]{0, 0, 0};
+    int32_t useTexture = 0;
+    float shininess = 32.0f;
+    float specularStrength = 0.5f;
+    float ambientStrength = 0.15f;
 };
 
 static std::vector<uint32_t> LoadSPIRV(const std::string& path) {
@@ -332,24 +359,76 @@ void EditorApp::InitImGui() {
     ImGui_ImplVulkan_Init(&initInfo);
 }
 
+void EditorApp::UpdateLightUBO() {
+    if (!m_lightUBOBuffer || !m_rootNode) return;
+
+    LightUBO ubo{};
+    ubo.cameraPos = glm::vec4(m_camera.GetPosition(), 0.0f);
+
+    std::vector<LightData> activeLights;
+
+    std::function<void(SceneNode*, const glm::mat4&)> collectLights = [&](SceneNode* node, const glm::mat4& parentTransform) {
+        if (!node || !node->visible) return;
+
+        glm::mat4 worldTransform = parentTransform * node->GetLocalTransform();
+
+        if (node->lightComponent) {
+            glm::vec3 worldPos = glm::vec3(worldTransform[3]);
+            glm::mat3 rotMat = glm::mat3(worldTransform);
+            glm::vec3 worldDir = rotMat * node->lightComponent->direction;
+
+            if (activeLights.size() < MAX_LIGHTS) {
+                activeLights.push_back(node->lightComponent->GetGPUData(worldPos, worldDir));
+            }
+        }
+
+        for (const auto& child : node->GetChildren()) {
+            collectLights(child.get(), worldTransform);
+        }
+    };
+
+    collectLights(m_rootNode.get(), glm::mat4(1.0f));
+
+    ubo.cameraPos.w = static_cast<float>(activeLights.size());
+    for (size_t i = 0; i < activeLights.size(); ++i) {
+        ubo.lights[i] = activeLights[i];
+    }
+
+    m_lightUBOBuffer->CopyToBuffer(&ubo, sizeof(LightUBO));
+}
+
 void EditorApp::CreateRenderPipeline() {
-    VkDescriptorSetLayoutBinding samplerLayoutBinding{};
-    samplerLayoutBinding.binding = 0;
-    samplerLayoutBinding.descriptorCount = 1;
-    samplerLayoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    samplerLayoutBinding.pImmutableSamplers = nullptr;
-    samplerLayoutBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+    std::vector<VkDescriptorSetLayoutBinding> bindings(2);
+    bindings[0].binding = 0;
+    bindings[0].descriptorCount = 1;
+    bindings[0].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    bindings[0].pImmutableSamplers = nullptr;
+    bindings[0].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+
+    bindings[1].binding = 1;
+    bindings[1].descriptorCount = 1;
+    bindings[1].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+    bindings[1].pImmutableSamplers = nullptr;
+    bindings[1].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
 
     VkDescriptorSetLayoutCreateInfo descriptorLayoutInfo{};
     descriptorLayoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-    descriptorLayoutInfo.bindingCount = 1;
-    descriptorLayoutInfo.pBindings = &samplerLayoutBinding;
+    descriptorLayoutInfo.bindingCount = static_cast<uint32_t>(bindings.size());
+    descriptorLayoutInfo.pBindings = bindings.data();
 
     if (vkCreateDescriptorSetLayout(m_context->GetDevice(), &descriptorLayoutInfo, nullptr, &m_textureDescriptorSetLayout) != VK_SUCCESS) {
         LOG_ERROR("Failed to create texture descriptor set layout!");
     }
 
-    m_defaultWhiteTexture = Texture::CreateWhiteTexture(*m_context, m_textureDescriptorSetLayout, *m_descriptorAllocator);
+    m_lightUBOBuffer = std::make_unique<Buffer>(
+        *m_context,
+        sizeof(LightUBO),
+        VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
+        VMA_MEMORY_USAGE_AUTO,
+        VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT | VMA_ALLOCATION_CREATE_MAPPED_BIT
+    );
+
+    m_defaultWhiteTexture = Texture::CreateWhiteTexture(*m_context, m_textureDescriptorSetLayout, *m_descriptorAllocator, m_lightUBOBuffer->GetBuffer());
 
     VkPushConstantRange pushConstant{};
     pushConstant.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
@@ -415,6 +494,16 @@ void EditorApp::CreateRenderPipeline() {
 
 void EditorApp::BuildSampleScene() {
     m_rootNode = std::make_unique<SceneNode>("Scene Root");
+    m_lightGizmoMesh = MeshComponent::CreateCube(*m_context, 0.25f);
+
+    // Add default Sun / Directional light node
+    auto sunNode = std::make_unique<SceneNode>("Sun / Main Light");
+    sunNode->position = glm::vec3(5.0f, 10.0f, 5.0f);
+    sunNode->rotationDegrees = glm::vec3(-45.0f, 45.0f, 0.0f);
+    sunNode->lightComponent = std::make_shared<LightComponent>(LightType::Directional);
+    sunNode->lightComponent->color = glm::vec3(1.0f, 0.95f, 0.85f);
+    sunNode->lightComponent->intensity = 1.0f;
+    m_rootNode->AddChild(std::move(sunNode));
 
     // Default cube in scene so viewport isn't empty on startup
     auto cubeNode = std::make_unique<SceneNode>("Cube");
@@ -458,10 +547,17 @@ void EditorApp::DrawSceneNode(VkCommandBuffer cmd, SceneNode* node, const glm::m
     // Compose world transform from parent and this node's local transform
     glm::mat4 worldTransform = parentTransform * node->GetLocalTransform();
 
-    // Draw the node's mesh (if it has one)
-    if (node->mesh) {
-        VkDescriptorSet textureDS = node->mesh->HasTexture() ?
-            node->mesh->GetTexture()->GetDescriptorSet() :
+    // Draw the node's mesh (if it has one), or light gizmo stub if it's a light node without a custom mesh
+    std::shared_ptr<MeshComponent> targetMesh = node->mesh;
+    bool isLightGizmo = false;
+    if (!targetMesh && node->lightComponent && m_lightGizmoMesh) {
+        targetMesh = m_lightGizmoMesh;
+        isLightGizmo = true;
+    }
+
+    if (targetMesh) {
+        VkDescriptorSet textureDS = targetMesh->HasTexture() ?
+            targetMesh->GetTexture()->GetDescriptorSet() :
             m_defaultWhiteTexture->GetDescriptorSet();
 
         vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, m_pipelineLayout,
@@ -470,12 +566,15 @@ void EditorApp::DrawSceneNode(VkCommandBuffer cmd, SceneNode* node, const glm::m
         PushConstants push{};
         push.model = worldTransform;
         push.mvp   = m_camera.GetViewProjectionMatrix() * worldTransform;
-        push.baseColorFactor = node->mesh->GetBaseColorFactor();
-        push.useTexture = node->mesh->HasTexture() ? 1 : 0;
+        push.baseColorFactor = isLightGizmo ? glm::vec4(node->lightComponent->color, 1.0f) : targetMesh->GetBaseColorFactor();
+        push.useTexture = targetMesh->HasTexture() ? 1 : 0;
+        push.shininess = 32.0f;
+        push.specularStrength = 0.5f;
+        push.ambientStrength = 0.15f;
 
         vkCmdPushConstants(cmd, m_pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
                            0, sizeof(PushConstants), &push);
-        node->mesh->Draw(cmd);
+        targetMesh->Draw(cmd);
     }
 
     // Recurse into children
@@ -485,6 +584,7 @@ void EditorApp::DrawSceneNode(VkCommandBuffer cmd, SceneNode* node, const glm::m
 }
 
 void EditorApp::RenderViewportOffscreen(VkCommandBuffer cmd) {
+    UpdateLightUBO();
     // Guard: don't attempt to render if the framebuffer image view is null
     if (m_viewportPanel->GetColorImageView() == VK_NULL_HANDLE) return;
 
@@ -649,10 +749,10 @@ void EditorApp::Run() {
         // atomically (destroy old + create new) when the framebuffer is resized, guaranteeing
         // ImGui::Image always gets a valid descriptor set.
         m_viewportPanel->RenderUI(m_camera, m_viewportDS, deltaTime,
-                                  m_activeDisplayMesh.get(), m_rootNode.get());
+                                  m_sceneTreePanel->GetSelectedNode(), m_rootNode.get());
 
         m_sceneTreePanel->RenderUI(m_rootNode.get(), m_activeDisplayMesh);
-        m_timelinePanel->RenderUI(m_timeline);
+        m_timelinePanel->RenderUI(m_timeline, m_sceneTreePanel->GetSelectedNode(), m_rootNode.get());
         m_vulkanInspectorPanel->RenderUI(*m_swapchain);
         RenderEngineLogConsole();
 

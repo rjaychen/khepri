@@ -38,6 +38,35 @@ void SceneTreePanel::RenderUI(SceneNode* rootNode, std::shared_ptr<MeshComponent
         m_selectedNode = raw;
     }
 
+    ImGui::TextColored(ImVec4(0.3f, 0.8f, 1.0f, 1.0f), "Add Light");
+    if (ImGui::Button("+ Sun (Dir)")) {
+        auto node = std::make_unique<SceneNode>("Directional Light");
+        node->position = glm::vec3(0.0f, 10.0f, 0.0f);
+        node->rotationDegrees = glm::vec3(-45.0f, 45.0f, 0.0f);
+        node->lightComponent = std::make_shared<LightComponent>(LightType::Directional);
+        node->lightComponent->color = glm::vec3(1.0f, 0.95f, 0.85f);
+        m_selectedNode = rootNode->AddChild(std::move(node));
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("+ Point Light")) {
+        auto node = std::make_unique<SceneNode>("Point Light");
+        node->position = glm::vec3(0.0f, 3.0f, 0.0f);
+        node->lightComponent = std::make_shared<LightComponent>(LightType::Point);
+        node->lightComponent->color = glm::vec3(1.0f, 0.8f, 0.4f);
+        node->lightComponent->intensity = 2.0f;
+        m_selectedNode = rootNode->AddChild(std::move(node));
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("+ Spot Light")) {
+        auto node = std::make_unique<SceneNode>("Spot Light");
+        node->position = glm::vec3(0.0f, 4.0f, 2.0f);
+        node->rotationDegrees = glm::vec3(-30.0f, 0.0f, 0.0f);
+        node->lightComponent = std::make_shared<LightComponent>(LightType::Spot);
+        node->lightComponent->color = glm::vec3(0.4f, 0.8f, 1.0f);
+        node->lightComponent->intensity = 3.0f;
+        m_selectedNode = rootNode->AddChild(std::move(node));
+    }
+
     ImGui::Separator();
 
     // --- Scene Tree ---
@@ -79,11 +108,28 @@ void SceneTreePanel::RenderNodeTree(SceneNode* node) {
     if (node == m_selectedNode)      flags |= ImGuiTreeNodeFlags_Selected;
     if (node->GetChildren().empty()) flags |= ImGuiTreeNodeFlags_Leaf;
 
-    if (!node->visible) ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.45f, 0.45f, 0.45f, 0.7f));
+    std::string nodeLabel = node->name;
+    bool isLight = (node->lightComponent != nullptr);
+    if (isLight) {
+        switch (node->lightComponent->type) {
+            case LightType::Directional: nodeLabel = "[Dir Light] " + node->name; break;
+            case LightType::Point:       nodeLabel = "[Point Light] " + node->name; break;
+            case LightType::Spot:        nodeLabel = "[Spot Light] " + node->name; break;
+        }
+    }
 
-    bool opened = ImGui::TreeNodeEx("##node", flags, "%s", node->name.c_str());
+    int colorsPushed = 0;
+    if (!node->visible) {
+        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.45f, 0.45f, 0.45f, 0.7f));
+        colorsPushed++;
+    } else if (isLight) {
+        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.90f, 0.30f, 1.0f)); // Bright yellow indicator for lights
+        colorsPushed++;
+    }
 
-    if (!node->visible) ImGui::PopStyleColor();
+    bool opened = ImGui::TreeNodeEx("##node", flags, "%s", nodeLabel.c_str());
+
+    if (colorsPushed > 0) ImGui::PopStyleColor(colorsPushed);
 
     if (ImGui::IsItemClicked() && !ImGui::IsItemToggledOpen()) {
         m_selectedNode = node;
@@ -94,8 +140,6 @@ void SceneTreePanel::RenderNodeTree(SceneNode* node) {
         if (ImGui::MenuItem("Delete")) {
             if (node->GetParent()) {
                 if (m_selectedNode == node) m_selectedNode = nullptr;
-                // WaitIdle before destroying any node that owns GPU buffers (mesh data).
-                // Without this, vkDestroyBuffer races with in-flight command buffers.
                 auto nodeHasMesh = [](SceneNode* n, auto& recurse) -> bool {
                     if (n->mesh) return true;
                     for (const auto& c : n->GetChildren())
@@ -167,6 +211,37 @@ void SceneTreePanel::RenderInspector(SceneNode* node) {
         }
         node->scale = newScale;
         node->SyncPropertiesToTransform();
+    }
+
+    if (node->lightComponent) {
+        ImGui::Separator();
+        ImGui::TextColored(ImVec4(0.3f, 0.8f, 1.0f, 1.0f), "💡 Light Component");
+
+        const char* lightTypes[] = { "Directional", "Point", "Spot" };
+        int currentType = static_cast<int>(node->lightComponent->type);
+        if (ImGui::Combo("Light Type", &currentType, lightTypes, IM_ARRAYSIZE(lightTypes))) {
+            node->lightComponent->type = static_cast<LightType>(currentType);
+        }
+
+        ImGui::ColorEdit3("Light Color", glm::value_ptr(node->lightComponent->color));
+        ImGui::DragFloat("Intensity", &node->lightComponent->intensity, 0.05f, 0.0f, 100.0f);
+
+        if (node->lightComponent->type == LightType::Directional || node->lightComponent->type == LightType::Spot) {
+            ImGui::DragFloat3("Local Direction", glm::value_ptr(node->lightComponent->direction), 0.02f, -1.0f, 1.0f);
+        }
+
+        if (node->lightComponent->type == LightType::Point || node->lightComponent->type == LightType::Spot) {
+            ImGui::TextDisabled("Distance Attenuation Factors:");
+            ImGui::DragFloat("Constant", &node->lightComponent->constantAttenuation, 0.01f, 0.1f, 10.0f);
+            ImGui::DragFloat("Linear", &node->lightComponent->linearAttenuation, 0.005f, 0.0f, 2.0f);
+            ImGui::DragFloat("Quadratic", &node->lightComponent->quadraticAttenuation, 0.001f, 0.0f, 1.0f);
+        }
+
+        if (node->lightComponent->type == LightType::Spot) {
+            ImGui::TextDisabled("Spot Cone Angles:");
+            ImGui::DragFloat("Inner Cutoff (°)", &node->lightComponent->innerCutoffAngle, 0.5f, 0.0f, 80.0f);
+            ImGui::DragFloat("Outer Cutoff (°)", &node->lightComponent->outerCutoffAngle, 0.5f, node->lightComponent->innerCutoffAngle, 89.0f);
+        }
     }
 
     if (node->mesh) {

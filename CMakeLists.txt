@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.20)
 set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
-project(KhepriEngine VERSION 0.1.1 LANGUAGES C CXX)
+project(KhepriEngine VERSION 0.1.2 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -194,6 +194,7 @@ if(BUILD_TESTS)
         src/mesh/MeshBoolean.cpp
         src/scene/SceneNode.cpp
         src/scene/MeshComponent.cpp
+        src/scene/Camera.cpp
         src/animation/Timeline.cpp
         src/animation/Rigging.cpp
         src/vulkan/Buffer.cpp

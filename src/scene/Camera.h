@@ -24,8 +24,9 @@ public:
     void Fly(glm::vec3 moveDir, float deltaTime);
     void AdjustFlySpeed(float deltaSpeed);
 
-    // MeshLab Focus Control
+    // MeshLab Focus Control & Scene Node Focus
     void FocusOnTarget(glm::vec3 target, float distance = 5.0f);
+    void FocusOnNode(const class SceneNode* node);
 
     glm::vec3 GetPosition() const { return m_position; }
     glm::vec3 GetTarget() const { return m_target; }

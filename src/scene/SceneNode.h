@@ -10,6 +10,7 @@
 #include "../core/PropertyReflection.h"
 
 #include "MeshComponent.h"
+#include "LightComponent.h"
 
 class SceneNode : public IReflectable {
 public:
@@ -20,6 +21,7 @@ public:
     uint32_t id;
     static uint32_t s_nextId;
     std::shared_ptr<MeshComponent> mesh;
+    std::shared_ptr<LightComponent> lightComponent;
 
     // Transform properties
     glm::vec3 position{0.0f, 0.0f, 0.0f};

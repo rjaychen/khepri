@@ -83,3 +83,12 @@ TEST_F(HalfEdgeTestFixture, VertexNeighbors){
     uint32_t expected[] = {1, 3, 4};
     ASSERT_THAT(nbrs, ::testing::UnorderedElementsAreArray(expected));
 }
+
+TEST_F(HalfEdgeTestFixture, BakeToRenderMeshOutputsCorrectCounts) {
+    std::vector<Vertex> bakedVertices;
+    std::vector<uint32_t> bakedIndices;
+    mesh.BakeToRenderMesh(bakedVertices, bakedIndices);
+
+    EXPECT_EQ(bakedVertices.size(), 5u);
+    EXPECT_EQ(bakedIndices.size(), 9u);
+}

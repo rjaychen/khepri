@@ -6,7 +6,7 @@
 #include <iostream>
 
 std::shared_ptr<SceneNode> GLTFImporter::LoadFromFile(VulkanContext& context, const std::string& filepath,
-                                               VkDescriptorSetLayout setLayout, DescriptorAllocator* allocator) {
+                                               VkDescriptorSetLayout setLayout, DescriptorAllocator* allocator, VkBuffer lightUBOBuffer) {
     LOG_INFO("Loading glTF model from: " + filepath);
 
     cgltf_options options = {};
@@ -55,69 +55,46 @@ std::shared_ptr<SceneNode> GLTFImporter::LoadFromFile(VulkanContext& context, co
             }
 
             if (!posAccessor) continue;
+            vertices.resize(posAccessor->count);
 
-            cgltf_size vertexCount = posAccessor->count;
-            vertices.resize(vertexCount);
-
-            for (cgltf_size v = 0; v < vertexCount; ++v) {
-                float pos[3] = {0, 0, 0};
-                cgltf_accessor_read_float(posAccessor, v, pos, 3);
-                vertices[v].position = glm::vec3(pos[0], pos[1], pos[2]);
-
-                if (normAccessor) {
-                    float norm[3] = {0, 1, 0};
-                    cgltf_accessor_read_float(normAccessor, v, norm, 3);
-                    vertices[v].normal = glm::vec3(norm[0], norm[1], norm[2]);
-                } else {
-                    vertices[v].normal = glm::vec3(0.0f, 1.0f, 0.0f);
-                }
-
-                if (uvAccessor) {
-                    float uv[2] = {0, 0};
-                    cgltf_accessor_read_float(uvAccessor, v, uv, 2);
-                    vertices[v].uv = glm::vec2(uv[0], uv[1]);
-                } else {
-                    vertices[v].uv = glm::vec2(0.0f, 0.0f);
-                }
+            for (cgltf_size v = 0; v < posAccessor->count; ++v) {
+                cgltf_accessor_read_float(posAccessor, v, &vertices[v].position.x, 3);
+                if (normAccessor) cgltf_accessor_read_float(normAccessor, v, &vertices[v].normal.x, 3);
+                if (uvAccessor)   cgltf_accessor_read_float(uvAccessor, v, &vertices[v].uv.x, 2);
             }
 
             // 2. Read Indices
             if (prim.indices) {
-                cgltf_size indexCount = prim.indices->count;
-                indices.resize(indexCount);
-                for (cgltf_size idx = 0; idx < indexCount; ++idx) {
+                indices.resize(prim.indices->count);
+                for (cgltf_size idx = 0; idx < prim.indices->count; ++idx) {
                     indices[idx] = static_cast<uint32_t>(cgltf_accessor_read_index(prim.indices, idx));
                 }
             } else {
                 // Non-indexed geometry
-                indices.resize(vertexCount);
-                for (uint32_t idx = 0; idx < vertexCount; ++idx) {
+                indices.resize(posAccessor->count);
+                for (uint32_t idx = 0; idx < posAccessor->count; ++idx) {
                     indices[idx] = idx;
                 }
             }
 
-            // 3. Read Material & Texture
+            // 3. Read Material Properties & Base Color Texture
+            glm::vec4 baseColorFactor(1.0f);
             std::shared_ptr<Texture> primitiveTexture = nullptr;
-            glm::vec4 baseColorFactor{1.0f, 1.0f, 1.0f, 1.0f};
 
             if (prim.material) {
-                const cgltf_material* mat = prim.material;
-                if (mat->has_pbr_metallic_roughness) {
-                    baseColorFactor = glm::vec4(
-                        mat->pbr_metallic_roughness.base_color_factor[0],
-                        mat->pbr_metallic_roughness.base_color_factor[1],
-                        mat->pbr_metallic_roughness.base_color_factor[2],
-                        mat->pbr_metallic_roughness.base_color_factor[3]
-                    );
+                if (prim.material->has_pbr_metallic_roughness) {
+                    const auto& pbr = prim.material->pbr_metallic_roughness;
+                    baseColorFactor = glm::vec4(pbr.base_color_factor[0], pbr.base_color_factor[1],
+                                               pbr.base_color_factor[2], pbr.base_color_factor[3]);
 
-                    if (setLayout != VK_NULL_HANDLE && allocator != nullptr) {
-                        const cgltf_texture_view& texView = mat->pbr_metallic_roughness.base_color_texture;
-                        if (texView.texture && texView.texture->image) {
-                            const cgltf_image* image = texView.texture->image;
+                    if (pbr.base_color_texture.texture && pbr.base_color_texture.texture->image) {
+                        const cgltf_image* image = pbr.base_color_texture.texture->image;
+                        if (setLayout != VK_NULL_HANDLE && allocator) {
                             if (image->buffer_view) {
-                                const uint8_t* imgData = reinterpret_cast<const uint8_t*>(image->buffer_view->buffer->data) + image->buffer_view->offset;
+                                const uint8_t* imgData = reinterpret_cast<const uint8_t*>(image->buffer_view->buffer->data)
+                                                       + image->buffer_view->offset;
                                 size_t imgSize = image->buffer_view->size;
-                                primitiveTexture = Texture::CreateFromMemory(context, imgData, imgSize, setLayout, *allocator);
+                                primitiveTexture = Texture::CreateFromMemory(context, imgData, imgSize, setLayout, *allocator, lightUBOBuffer);
                             } else if (image->uri) {
                                 std::string uriStr = image->uri;
                                 std::string dir = "";
@@ -126,7 +103,7 @@ std::shared_ptr<SceneNode> GLTFImporter::LoadFromFile(VulkanContext& context, co
                                     dir = filepath.substr(0, lastSlash + 1);
                                 }
                                 std::string fullImagePath = dir + uriStr;
-                                primitiveTexture = Texture::CreateFromFile(context, fullImagePath, setLayout, *allocator);
+                                primitiveTexture = Texture::CreateFromFile(context, fullImagePath, setLayout, *allocator, lightUBOBuffer);
                             }
                         }
                     }

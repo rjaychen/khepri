@@ -37,6 +37,11 @@ struct AnimationClip {
     float duration = 5.0f;
     float ticksPerSecond = 24.0f;
     std::vector<AnimationTrack> tracks;
+
+    AnimationTrack* GetOrCreateTrack(const std::string& targetNodeName);
+    void AddOrUpdatePositionKey(const std::string& targetNodeName, float time, const glm::vec3& position);
+    void AddOrUpdateRotationKey(const std::string& targetNodeName, float time, const glm::quat& rotation);
+    void AddOrUpdateScaleKey(const std::string& targetNodeName, float time, const glm::vec3& scale);
 };
 
 class Timeline {
@@ -48,13 +53,16 @@ public:
     void Pause() { m_isPlaying = false; }
     void Stop() { m_isPlaying = false; m_currentTime = 0.0f; }
 
-    void SetCurrentTime(float time);
+    void SetCurrentTime(float time, SceneNode* rootSceneNode = nullptr);
     float GetCurrentTime() const { return m_currentTime; }
     float GetDuration() const { return m_clip ? m_clip->duration : 0.0f; }
     bool IsPlaying() const { return m_isPlaying; }
     bool IsLooping() const { return m_isLooping; }
     void SetLooping(bool loop) { m_isLooping = loop; }
 
+    void KeyframeNodePose(const SceneNode* node);
+
+    void EvaluateAtTime(float time, SceneNode* rootSceneNode, Skeleton* skeleton = nullptr);
     void Update(float deltaTime, SceneNode* rootSceneNode, Skeleton* skeleton = nullptr);
 
     std::shared_ptr<AnimationClip> GetCurrentClip() const { return m_clip; }

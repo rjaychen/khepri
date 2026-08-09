@@ -58,5 +58,24 @@ void MeshLabPanel::RenderUI(std::shared_ptr<MeshComponent>& activeDisplayMesh) {
         }
     }
 
+    // Section 3: Data-Oriented Mesh Baking (Phase 2)
+    if (ImGui::CollapsingHeader("3. Data-Oriented Mesh Baking", ImGuiTreeNodeFlags_DefaultOpen)) {
+        ImGui::TextWrapped("Flattens index-based HalfEdgeMesh topology into Vulkan Render Mesh buffers.");
+        if (ImGui::Button("Bake Authoring Mesh to Render Buffers")) {
+            if (m_authoringMesh.GetVertices().empty() && activeDisplayMesh) {
+                m_authoringMesh.BuildFromIndexedMesh(activeDisplayMesh->GetVertices(), activeDisplayMesh->GetIndices());
+            }
+            if (!m_authoringMesh.GetVertices().empty()) {
+                std::vector<Vertex> bakedVertices;
+                std::vector<uint32_t> bakedIndices;
+                m_authoringMesh.BakeToRenderMesh(bakedVertices, bakedIndices);
+                activeDisplayMesh = std::make_shared<MeshComponent>(m_context, bakedVertices, bakedIndices);
+                LOG_INFO("Successfully baked HalfEdgeMesh topology to GPU Render Mesh (" +
+                         std::to_string(bakedVertices.size()) + " vertices, " +
+                         std::to_string(bakedIndices.size() / 3) + " triangles)");
+            }
+        }
+    }
+
     ImGui::End();
 }
