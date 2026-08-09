@@ -7,6 +7,7 @@
 #include <string>
 #include <optional>
 #include <memory>
+#include <functional>
 
 struct QueueFamilyIndices {
     std::optional<uint32_t> graphicsFamily;
@@ -38,6 +39,7 @@ public:
     VkPhysicalDeviceProperties GetDeviceProperties() const { return m_deviceProperties; }
 
     void WaitIdle() const { vkDeviceWaitIdle(m_device); }
+    void ImmediateSubmit(std::function<void(VkCommandBuffer cmd)>&& action) const;
 
 private:
     void InitVolk();

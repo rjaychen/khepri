@@ -5,11 +5,24 @@
 #include <utility>
 #include "../scene/MeshComponent.h"
 
+// Constraint edge definition for CDT algorithms
 struct CDT_Constraint {
     uint32_t p0;
     uint32_t p1;
 };
 
+/**
+ * Constrained Delaunay Triangulation (CDT) class.
+ *
+ * Algorithm Overview:
+ * 1. Projects 3D planar polygons onto principal 2D basis vectors (u, v).
+ * 2. Triangulates 2D point set using Bowyer-Watson incremental Delaunay insertion
+ *    with Shewchuk exact floating-point predicates (InCircle2D).
+ * 3. Re-projects generated 2D Delaunay triangles back into 3D mesh vertices.
+ *
+ * Implementation Note:
+ * Constraint edge splitting/insertion (CDT_Constraint) is currently held off per design specification.
+ */
 class CDT {
 public:
     CDT() = default;

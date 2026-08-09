@@ -25,6 +25,9 @@ public:
 
     VkSurfaceKHR CreateSurface(VkInstance instance);
 
+    void SetTitle(const std::string& title);
+    const std::string& GetTitle() const { return m_title; }
+
     void SetResizeCallback(std::function<void(int, int)> callback) {
         m_resizeCallback = callback;
     }

@@ -1,6 +1,6 @@
-﻿cmake_minimum_required(VERSION 3.20)
+cmake_minimum_required(VERSION 3.20)
 set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
-project(VulkanGeometryEngine VERSION 1.0 LANGUAGES C CXX)
+project(KhepriEngine VERSION 1.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -86,17 +86,33 @@ file(GLOB_RECURSE ENGINE_SOURCES
     "src/*.hpp"
 )
 
-add_executable(VulkanGeometryEngine ${ENGINE_SOURCES})
+# Explicitly list GLTFImporter to prevent CMake globbing cache issues
+list(APPEND ENGINE_SOURCES
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/mesh/GLTFImporter.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/mesh/GLTFImporter.h"
+)
+list(REMOVE_DUPLICATES ENGINE_SOURCES)
 
-target_include_directories(VulkanGeometryEngine PRIVATE 
+add_executable(KhepriEngine ${ENGINE_SOURCES})
+
+# 7. stb (Image Loader)
+message(STATUS "Fetching stb...")
+FetchContent_Declare(
+    stb
+    URL https://github.com/nothings/stb/archive/refs/heads/master.zip
+)
+FetchContent_MakeAvailable(stb)
+
+target_include_directories(KhepriEngine PRIVATE 
     src
     ${vulkan_headers_SOURCE_DIR}/include
     ${vma_SOURCE_DIR}/include
+    ${stb_SOURCE_DIR}
 )
 
-target_compile_definitions(VulkanGeometryEngine PRIVATE VK_NO_PROTOTYPES GLM_FORCE_RADIANS GLM_FORCE_DEPTH_ZERO_TO_ONE)
+target_compile_definitions(KhepriEngine PRIVATE VK_NO_PROTOTYPES GLM_FORCE_RADIANS GLM_FORCE_DEPTH_ZERO_TO_ONE)
 
-target_link_libraries(VulkanGeometryEngine PRIVATE 
+target_link_libraries(KhepriEngine PRIVATE 
     glfw 
     glm::glm 
     volk 
@@ -105,7 +121,7 @@ target_link_libraries(VulkanGeometryEngine PRIVATE
 )
 
 if(MSVC)
-    target_compile_options(VulkanGeometryEngine PRIVATE /W4 /utf-8)
+    target_compile_options(KhepriEngine PRIVATE /W4 /utf-8)
 endif()
 
 # -------------------------------------------------------
@@ -142,8 +158,15 @@ if(GLSLC)
     endforeach()
 
     add_custom_target(Shaders ALL DEPENDS ${SPV_OUTPUTS})
-    add_dependencies(VulkanGeometryEngine Shaders)
-    message(STATUS "Shader auto-compilation enabled")
+    add_dependencies(KhepriEngine Shaders)
+
+    add_custom_command(TARGET KhepriEngine POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+            "${SHADER_OUTPUT_DIR}"
+            "$<TARGET_FILE_DIR:KhepriEngine>/shaders/compiled"
+        COMMENT "Copying compiled shaders to output executable directory"
+    )
+    message(STATUS "Shader auto-compilation and post-build copying enabled")
 else()
     message(WARNING "glslc not found - shaders will NOT be compiled automatically. Install Vulkan SDK.")
 endif()

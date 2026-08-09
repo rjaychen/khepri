@@ -1,5 +1,9 @@
 #include "ViewportPanel.h"
+#include "../scene/MeshComponent.h"
+#include "../scene/SceneNode.h"
 #include "../core/Logger.h"
+#include <imgui_impl_vulkan.h>
+#include <algorithm>
 #include <stdexcept>
 
 ViewportPanel::ViewportPanel(VulkanContext& context)
@@ -87,18 +91,67 @@ void ViewportPanel::CreateFramebuffer(uint32_t width, uint32_t height) {
     vkCreateImageView(m_context.GetDevice(), &viewInfo, nullptr, &m_depthImageView);
 }
 
-void ViewportPanel::RenderUI(Camera& camera, VkDescriptorSet viewportTextureDS) {
-    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
+void ViewportPanel::RenderUI(Camera& camera, VkDescriptorSet& viewportTextureDS, float deltaTime, const MeshComponent* activeMesh, const SceneNode* rootNode) {
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(4, 4));
     ImGui::Begin("3D Viewport", nullptr, ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
 
     m_isFocused = ImGui::IsWindowFocused();
     m_isHovered = ImGui::IsWindowHovered();
 
+    auto focusOnMesh = [&]() {
+        glm::vec3 targetPos(0.0f);
+        float distance = 4.0f;
+        if (activeMesh) {
+            targetPos = activeMesh->GetBoundingBoxCenter();
+            distance = std::max(1.5f, activeMesh->GetBoundingBoxRadius() * 2.5f);
+            if (rootNode) {
+                targetPos = glm::vec3(rootNode->GetWorldTransform() * glm::vec4(targetPos, 1.0f));
+            }
+        }
+        camera.FocusOnTarget(targetPos, distance);
+    };
+
+    // Top Viewport Control Bar
+    ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(6, 3));
+    ImGui::BeginGroup();
+    ImGui::TextColored(ImVec4(0.3f, 0.8f, 1.0f, 1.0f), "🎮 Unreal Flycam Controls:"); ImGui::SameLine();
+    ImGui::TextDisabled("(Hold RMB + WASDQE to Fly | Scroll wheel to adjust speed)"); ImGui::SameLine();
+
+    ImGui::SetNextItemWidth(100);
+    float flySpeed = camera.GetFlySpeed();
+    if (ImGui::SliderFloat("Speed", &flySpeed, 0.5f, 20.0f, "%.1f")) {
+        camera.SetFlySpeed(flySpeed);
+    }
+
+    ImGui::SameLine();
+    if (ImGui::Button("Reset View (F)")) {
+        focusOnMesh();
+    }
+    ImGui::EndGroup();
+    ImGui::PopStyleVar();
+    ImGui::Separator();
+
     ImVec2 viewportSize = ImGui::GetContentRegionAvail();
-    if ((uint32_t)viewportSize.x != m_width || (uint32_t)viewportSize.y != m_height) {
-        if (viewportSize.x > 0 && viewportSize.y > 0) {
+    if (viewportSize.x > 0.0f && viewportSize.y > 0.0f) {
+        if ((uint32_t)viewportSize.x != m_width || (uint32_t)viewportSize.y != m_height) {
+            // Correct GPU-safe DS lifecycle order:
+            //  1. CreateFramebuffer -> calls WaitIdle internally -> GPU is idle,
+            //     old VkImage + VkImageView are destroyed safely inside.
+            //  2. RemoveTexture on OLD DS -> vkFreeDescriptorSets -> safe now GPU is idle.
+            //  3. AddTexture with new VkImageView -> fresh, valid DS for ImGui::Image.
+            // WRONG order was: RemoveTexture first (GPU still using the DS) -> then WaitIdle.
+            VkDescriptorSet oldDS = viewportTextureDS;
+            viewportTextureDS = VK_NULL_HANDLE;
             CreateFramebuffer((uint32_t)viewportSize.x, (uint32_t)viewportSize.y);
             camera.SetViewportSize(viewportSize.x, viewportSize.y);
+            if (oldDS != VK_NULL_HANDLE) {
+                ImGui_ImplVulkan_RemoveTexture(oldDS);  // GPU is now idle - safe
+            }
+            viewportTextureDS = ImGui_ImplVulkan_AddTexture(
+                m_sampler,
+                m_colorImageView,
+                VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+            );
         }
     }
 
@@ -106,21 +159,67 @@ void ViewportPanel::RenderUI(Camera& camera, VkDescriptorSet viewportTextureDS) 
         ImGui::Image((ImTextureID)viewportTextureDS, viewportSize);
     }
 
-    // Viewport Interactive Camera Input Controls
-    if (m_isHovered && ImGui::IsMouseDown(ImGuiMouseButton_Right)) {
-        ImVec2 dragDelta = ImGui::GetMouseDragDelta(ImGuiMouseButton_Right);
-        ImGui::ResetMouseDragDelta(ImGuiMouseButton_Right);
-        camera.Orbit(dragDelta.x, dragDelta.y);
+    // Hotkey Focus ('F')
+    if ((m_isFocused || m_isHovered) && ImGui::IsKeyPressed(ImGuiKey_F)) {
+        focusOnMesh();
     }
-    if (m_isHovered && ImGui::IsMouseDown(ImGuiMouseButton_Middle)) {
-        ImVec2 dragDelta = ImGui::GetMouseDragDelta(ImGuiMouseButton_Middle);
-        ImGui::ResetMouseDragDelta(ImGuiMouseButton_Middle);
-        camera.Pan(dragDelta.x, dragDelta.y);
-    }
-    if (m_isHovered) {
+
+    // Unreal Engine Camera Controls (RMB Fly/Look, RMB+LMB / MMB Pan, LMB Orbit, WASDQE Fly)
+    bool rmbDown = ImGui::IsMouseDown(ImGuiMouseButton_Right);
+    bool lmbDown = ImGui::IsMouseDown(ImGuiMouseButton_Left);
+    bool mmbDown = ImGui::IsMouseDown(ImGuiMouseButton_Middle);
+
+    if (m_isHovered || m_isFocused) {
+        if (rmbDown && lmbDown) {
+            // RMB + LMB Drag: Viewplane Pan (Unreal Engine standard)
+            ImVec2 delta = ImGui::GetMouseDragDelta(ImGuiMouseButton_Right);
+            ImGui::ResetMouseDragDelta(ImGuiMouseButton_Right);
+            ImGui::ResetMouseDragDelta(ImGuiMouseButton_Left);
+            if (std::abs(delta.x) > 0.01f || std::abs(delta.y) > 0.01f) {
+                camera.Pan(delta.x, delta.y);
+            }
+        } else if (rmbDown) {
+            // RMB Drag: First-Person Look / Turn
+            ImVec2 delta = ImGui::GetMouseDragDelta(ImGuiMouseButton_Right);
+            ImGui::ResetMouseDragDelta(ImGuiMouseButton_Right);
+            if (std::abs(delta.x) > 0.01f || std::abs(delta.y) > 0.01f) {
+                camera.Look(delta.x, delta.y);
+            }
+        } else if (mmbDown) {
+            // MMB Drag: Viewplane Pan
+            ImVec2 delta = ImGui::GetMouseDragDelta(ImGuiMouseButton_Middle);
+            ImGui::ResetMouseDragDelta(ImGuiMouseButton_Middle);
+            if (std::abs(delta.x) > 0.01f || std::abs(delta.y) > 0.01f) {
+                camera.Pan(delta.x, delta.y);
+            }
+        } else if (lmbDown) {
+            // LMB Drag: Orbit View
+            ImVec2 delta = ImGui::GetMouseDragDelta(ImGuiMouseButton_Left);
+            ImGui::ResetMouseDragDelta(ImGuiMouseButton_Left);
+            if (std::abs(delta.x) > 0.01f || std::abs(delta.y) > 0.01f) {
+                camera.Orbit(delta.x, delta.y);
+            }
+        }
+
+        if (rmbDown) {
+            // WASDQE Fly Movement (E = Up, Q = Down - Unreal Engine Standard)
+            glm::vec3 moveDir(0.0f);
+            if (ImGui::IsKeyDown(ImGuiKey_W)) moveDir.z += 1.0f;
+            if (ImGui::IsKeyDown(ImGuiKey_S)) moveDir.z -= 1.0f;
+            if (ImGui::IsKeyDown(ImGuiKey_D)) moveDir.x += 1.0f;
+            if (ImGui::IsKeyDown(ImGuiKey_A)) moveDir.x -= 1.0f;
+            if (ImGui::IsKeyDown(ImGuiKey_E)) moveDir.y += 1.0f;
+            if (ImGui::IsKeyDown(ImGuiKey_Q)) moveDir.y -= 1.0f;
+
+            if (glm::length(moveDir) > 0.001f) {
+                camera.Fly(moveDir, deltaTime);
+            }
+        }
+
         float wheel = ImGui::GetIO().MouseWheel;
         if (wheel != 0.0f) {
-            camera.Zoom(wheel);
+            if (rmbDown) camera.AdjustFlySpeed(wheel);
+            else camera.Zoom(wheel);
         }
     }
 

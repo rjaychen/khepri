@@ -1,5 +1,14 @@
 #version 450
 
+layout(set = 0, binding = 0) uniform sampler2D texSampler;
+
+layout(push_constant) uniform PushConstants {
+    mat4 mvp;
+    mat4 model;
+    vec4 baseColorFactor;
+    int useTexture;
+} pc;
+
 layout(location = 0) in vec3 fragNormal;
 layout(location = 1) in vec2 fragUV;
 
@@ -16,6 +25,9 @@ void main() {
     float ambient = 0.25;
     float light = ambient + diff1 * 0.75 + diff2;
 
-    vec3 baseColor = vec3(0.35, 0.65, 0.95);  // Vibrant blue-cyan surface
-    outColor = vec4(baseColor * light, 1.0);
+    vec4 texColor = texture(texSampler, fragUV);
+    vec3 baseColor = (pc.useTexture == 1) ? (texColor.rgb * pc.baseColorFactor.rgb) : pc.baseColorFactor.rgb;
+    float alpha = (pc.useTexture == 1) ? (texColor.a * pc.baseColorFactor.a) : pc.baseColorFactor.a;
+
+    outColor = vec4(baseColor * light, alpha);
 }

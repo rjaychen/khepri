@@ -9,6 +9,8 @@
 #include <glm/gtx/quaternion.hpp>
 #include "../core/PropertyReflection.h"
 
+#include "MeshComponent.h"
+
 class SceneNode : public IReflectable {
 public:
     SceneNode(const std::string& name = "Node");
@@ -17,11 +19,16 @@ public:
     std::string name;
     uint32_t id;
     static uint32_t s_nextId;
+    std::shared_ptr<MeshComponent> mesh;
 
     // Transform properties
     glm::vec3 position{0.0f, 0.0f, 0.0f};
     glm::vec3 rotationDegrees{0.0f, 0.0f, 0.0f}; // Euler angles for UI editing
     glm::vec3 scale{1.0f, 1.0f, 1.0f};
+    bool lockScale = false; // Lock scale aspect ratio
+
+    // Visibility — if false, node and all children are skipped during rendering
+    bool visible = true;
 
     glm::mat4 GetLocalTransform() const;
     glm::mat4 GetWorldTransform() const;

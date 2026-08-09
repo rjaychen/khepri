@@ -19,8 +19,21 @@ public:
     void Pan(float deltaX, float deltaY);
     void Zoom(float deltaZoom);
 
+    // Unreal Engine Flycam Controls
+    void Look(float deltaX, float deltaY);
+    void Fly(glm::vec3 moveDir, float deltaTime);
+    void AdjustFlySpeed(float deltaSpeed);
+
+    // MeshLab Focus Control
+    void FocusOnTarget(glm::vec3 target, float distance = 5.0f);
+
     glm::vec3 GetPosition() const { return m_position; }
     glm::vec3 GetTarget() const { return m_target; }
+    float GetFlySpeed() const { return m_flySpeed; }
+    void SetFlySpeed(float speed) { m_flySpeed = std::max(0.1f, speed); }
+    float GetYaw() const { return m_yaw; }
+    float GetPitch() const { return m_pitch; }
+    float GetDistance() const { return m_distance; }
 
 private:
     void UpdateVectors();
@@ -37,4 +50,5 @@ private:
     float m_yaw = -90.0f;
     float m_pitch = 0.0f;
     float m_distance = 5.0f;
+    float m_flySpeed = 5.0f;
 };

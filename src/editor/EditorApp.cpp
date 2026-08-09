@@ -1,11 +1,13 @@
 #include "EditorApp.h"
 #include "../core/Logger.h"
+#include "../core/FileDialog.h"
+#include "../mesh/GLTFImporter.h"
 #include <glm/gtc/matrix_transform.hpp>
 #include <chrono>
 #include <fstream>
 #include <imgui_internal.h>
 
-static void BuildDefaultDockLayout(ImGuiID dockspaceID) {
+void EditorApp::ApplyDockLayout(ImGuiID dockspaceID) {
     ImGui::DockBuilderRemoveNode(dockspaceID);
     ImGui::DockBuilderAddNode(dockspaceID, ImGuiDockNodeFlags_DockSpace);
     ImGui::DockBuilderSetNodeSize(dockspaceID, ImGui::GetMainViewport()->Size);
@@ -13,29 +15,143 @@ static void BuildDefaultDockLayout(ImGuiID dockspaceID) {
     ImGuiID dockMain = dockspaceID;
     ImGuiID dockLeft = ImGui::DockBuilderSplitNode(dockMain, ImGuiDir_Left, 0.22f, nullptr, &dockMain);
     ImGuiID dockRight = ImGui::DockBuilderSplitNode(dockMain, ImGuiDir_Right, 0.25f, nullptr, &dockMain);
-    ImGuiID dockBottom = ImGui::DockBuilderSplitNode(dockMain, ImGuiDir_Down, 0.28f, nullptr, &dockMain);
+    ImGuiID dockBottom = ImGui::DockBuilderSplitNode(dockMain, ImGuiDir_Down, 0.22f, nullptr, &dockMain);
 
     ImGuiID dockRightTop = dockRight;
-    ImGuiID dockRightBottom = ImGui::DockBuilderSplitNode(dockRightTop, ImGuiDir_Down, 0.50f, nullptr, &dockRightTop);
+    ImGuiID dockRightBottom = ImGui::DockBuilderSplitNode(dockRightTop, ImGuiDir_Down, 0.45f, nullptr, &dockRightTop);
 
-    // Left Panel: Mesh Generation Workbench
-    ImGui::DockBuilderDockWindow("Mesh Generation Workbench", dockLeft);
-
-    // Center Area: 3D Viewport
+    ImGui::DockBuilderDockWindow("Scene Hierarchy", dockLeft);
     ImGui::DockBuilderDockWindow("3D Viewport", dockMain);
-
-    // Top Right Panel: Scene Hierarchy
-    ImGui::DockBuilderDockWindow("Scene Hierarchy", dockRightTop);
-
-    // Bottom Right Panel: Inspector & Vulkan Inspector
-    ImGui::DockBuilderDockWindow("Inspector", dockRightBottom);
+    ImGui::DockBuilderDockWindow("Inspector", dockRightTop);
     ImGui::DockBuilderDockWindow("Vulkan Educational Inspector", dockRightBottom);
-
-    // Bottom Panel: Animation Timeline & Engine Log Console
     ImGui::DockBuilderDockWindow("Animation Timeline", dockBottom);
     ImGui::DockBuilderDockWindow("Engine Log Console", dockBottom);
 
     ImGui::DockBuilderFinish(dockspaceID);
+}
+
+void EditorApp::SetEditorMode(EditorMode mode) {
+    m_currentMode = mode;
+}
+
+void EditorApp::LoadGLTFModel(const std::string& path) {
+    m_context->WaitIdle();
+    auto loadedNode = GLTFImporter::LoadFromFile(*m_context, path, m_textureDescriptorSetLayout, m_descriptorAllocator.get());
+    if (loadedNode) {
+        m_rootNode = loadedNode;
+        const auto& children = m_rootNode->GetChildren();
+        if (!children.empty() && children[0]->mesh) {
+            m_activeDisplayMesh = children[0]->mesh;
+        }
+        m_camera.FocusOnTarget(glm::vec3(0.0f), 4.0f);
+        LOG_INFO("Loaded model into scene: " + path);
+    } else {
+        LOG_ERROR("Failed to load glTF model from: " + path);
+    }
+}
+
+void EditorApp::LoadSampleModel(const std::string& name) {
+    m_context->WaitIdle();
+    if (name == "Box") {
+        LoadGLTFModel("assets/models/Box.gltf");
+    } else {
+        m_activeDisplayMesh = GLTFImporter::CreateSampleMesh(*m_context, name);
+        m_rootNode = std::make_shared<SceneNode>("Scene Root");
+        auto childNode = std::make_unique<SceneNode>(name + " Node");
+        childNode->mesh = m_activeDisplayMesh;
+        m_rootNode->AddChild(std::move(childNode));
+        m_camera.FocusOnTarget(glm::vec3(0.0f), 4.0f);
+        LOG_INFO("Loaded sample primitive model: " + name);
+    }
+}
+
+void EditorApp::RenderMainMenuBar(ImGuiID dockspaceID) {
+    (void)dockspaceID;
+    if (ImGui::BeginMainMenuBar()) {
+        ImGui::TextColored(ImVec4(0.3f, 0.8f, 1.0f, 1.0f), "Khepri Engine v1.0");
+        ImGui::Separator();
+
+        if (ImGui::BeginMenu("File")) {
+            if (ImGui::MenuItem("Open glTF 2.0 Model (File Explorer)...")) {
+                std::string selectedPath = FileDialog::OpenFile();
+                if (!selectedPath.empty()) {
+                    LoadGLTFModel(selectedPath);
+                }
+            }
+            if (ImGui::MenuItem("Open glTF Path...")) {
+                m_openGltfModal = true;
+            }
+            if (ImGui::BeginMenu("Sample 3D Models")) {
+                if (ImGui::MenuItem("Box (glTF)"))  LoadSampleModel("Box");
+                if (ImGui::MenuItem("Sphere"))       LoadSampleModel("Sphere");
+                if (ImGui::MenuItem("Cylinder"))     LoadSampleModel("Cylinder");
+                if (ImGui::MenuItem("Plane"))        LoadSampleModel("Plane");
+                ImGui::EndMenu();
+            }
+            ImGui::EndMenu();
+        }
+
+        if (ImGui::BeginMenu("View")) {
+            if (ImGui::MenuItem("Reset Camera View (F)")) {
+                m_camera.FocusOnTarget(glm::vec3(0.0f));
+            }
+            if (ImGui::MenuItem("Reset Layout")) {
+                m_rebuildLayout = true;
+            }
+            ImGui::EndMenu();
+        }
+
+        if (ImGui::BeginMenu("Help")) {
+            if (ImGui::MenuItem("About Khepri Engine")) {
+                ImGui::OpenPopup("About Khepri Engine Modal");
+            }
+            ImGui::EndMenu();
+        }
+
+        // glTF path modal
+        if (m_openGltfModal) {
+            ImGui::OpenPopup("Open glTF 2.0 Model");
+            m_openGltfModal = false;
+        }
+
+        if (ImGui::BeginPopupModal("Open glTF 2.0 Model", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+            ImGui::Text("Enter local filepath or browse for .gltf / .glb file:");
+            ImGui::InputText("Path", m_gltfPathInput, sizeof(m_gltfPathInput));
+            ImGui::SameLine();
+            if (ImGui::Button("Browse...")) {
+                std::string selectedPath = FileDialog::OpenFile();
+                if (!selectedPath.empty()) {
+                    strncpy(m_gltfPathInput, selectedPath.c_str(), sizeof(m_gltfPathInput));
+                    m_gltfPathInput[sizeof(m_gltfPathInput) - 1] = '\0';
+                }
+            }
+            if (ImGui::Button("Load Model", ImVec2(120, 0))) {
+                LoadGLTFModel(m_gltfPathInput);
+                ImGui::CloseCurrentPopup();
+            }
+            ImGui::SameLine();
+            if (ImGui::Button("Cancel", ImVec2(120, 0))) {
+                ImGui::CloseCurrentPopup();
+            }
+            ImGui::EndPopup();
+        }
+
+        if (ImGui::BeginPopupModal("About Khepri Engine Modal", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+            ImGui::TextColored(ImVec4(0.4f, 0.8f, 1.0f, 1.0f), "Khepri Engine v1.0");
+            ImGui::Text("Data-Oriented Vulkan Graphics & Computational Geometry Engine");
+            ImGui::Separator();
+            ImGui::Text("• Control Scheme: Unreal Engine Flycam (RMB+WASDQE) & MeshLab Trackball");
+            ImGui::Text("• Asset Importer: glTF 2.0 (.gltf / .glb)");
+            ImGui::Text("• Architecture: Two-Tiered Data-Oriented Index-Based Mesh Topology");
+            ImGui::Separator();
+            if (ImGui::Button("Close")) {
+                ImGui::CloseCurrentPopup();
+            }
+            ImGui::EndPopup();
+        }
+
+        ImGui::EndMainMenuBar();
+    }
 }
 
 static void RenderEngineLogConsole() {
@@ -51,8 +167,8 @@ static void RenderEngineLogConsole() {
     ImGui::BeginChild("LogScrollRegion", ImVec2(0, 0), false, ImGuiWindowFlags_HorizontalScrollbar);
     for (const auto& log : Logger::Get().GetLogs()) {
         ImVec4 color(0.9f, 0.9f, 0.9f, 1.0f);
-        if (log.level == LogLevel::Warning) color = ImVec4(1.0f, 0.8f, 0.2f, 1.0f);
-        else if (log.level == LogLevel::Error) color = ImVec4(1.0f, 0.3f, 0.3f, 1.0f);
+        if (log.level == LogLevel::Warning)     color = ImVec4(1.0f, 0.8f, 0.2f, 1.0f);
+        else if (log.level == LogLevel::Error)  color = ImVec4(1.0f, 0.3f, 0.3f, 1.0f);
         else if (log.level == LogLevel::VulkanDebug) color = ImVec4(0.4f, 0.7f, 1.0f, 1.0f);
 
         ImGui::TextColored(color, "[%s] %s", log.timestamp.c_str(), log.message.c_str());
@@ -67,28 +183,50 @@ static void RenderEngineLogConsole() {
 struct PushConstants {
     glm::mat4 mvp;
     glm::mat4 model;
+    glm::vec4 baseColorFactor{1.0f, 1.0f, 1.0f, 1.0f};
+    int useTexture = 0;
+    int padding[3]{0, 0, 0};
 };
 
-// -------------------------------------------------------
-// Shader loading helper
-// Reads a compiled .spv file from shaders/compiled/ next
-// to the executable (or relative to the working directory).
-// -------------------------------------------------------
 static std::vector<uint32_t> LoadSPIRV(const std::string& path) {
-    std::ifstream file(path, std::ios::ate | std::ios::binary);
-    if (!file.is_open()) {
-        throw std::runtime_error("Failed to open shader file: " + path);
+    std::string filename = path;
+    size_t lastSlash = path.find_last_of("/\\");
+    if (lastSlash != std::string::npos) {
+        filename = path.substr(lastSlash + 1);
     }
-    size_t fileSize = static_cast<size_t>(file.tellg());
-    std::vector<uint32_t> buffer(fileSize / sizeof(uint32_t));
-    file.seekg(0);
-    file.read(reinterpret_cast<char*>(buffer.data()), fileSize);
-    return buffer;
+
+    std::vector<std::string> candidatePaths = {
+        path,
+        "shaders/compiled/" + filename,
+        "../" + path,
+        "../../" + path,
+        "../../../" + path,
+        "../shaders/compiled/" + filename,
+        "../../shaders/compiled/" + filename,
+        "../../../shaders/compiled/" + filename
+    };
+
+    for (const auto& candidate : candidatePaths) {
+        std::ifstream file(candidate, std::ios::ate | std::ios::binary);
+        if (file.is_open()) {
+            size_t fileSize = static_cast<size_t>(file.tellg());
+            if (fileSize > 0) {
+                std::vector<uint32_t> buffer(fileSize / sizeof(uint32_t));
+                file.seekg(0);
+                file.read(reinterpret_cast<char*>(buffer.data()), fileSize);
+                LOG_INFO("Successfully loaded shader SPIR-V from: " + candidate);
+                return buffer;
+            }
+        }
+    }
+
+    LOG_ERROR("Failed to open shader file across all candidate paths: " + path);
+    throw std::runtime_error("Failed to open shader file: " + path);
 }
 
 EditorApp::EditorApp()
-    : m_window(1280, 720, "Vulkan Graphics & Computational Geometry Engine Editor") {
-    
+    : m_window(1280, 720, "Khepri Engine - [Mesh Generation & Editing Mode]") {
+
     m_context = std::make_unique<VulkanContext>(m_window.GetNativeWindow(), true);
     m_swapchain = std::make_unique<Swapchain>(*m_context, m_window.GetWidth(), m_window.GetHeight());
     m_descriptorAllocator = std::make_unique<DescriptorAllocator>(*m_context, 100);
@@ -100,10 +238,9 @@ EditorApp::EditorApp()
     m_viewportPanel = std::make_unique<ViewportPanel>(*m_context);
     m_sceneTreePanel = std::make_unique<SceneTreePanel>(*m_context);
     m_timelinePanel = std::make_unique<TimelinePanel>();
-    m_meshLabPanel = std::make_unique<MeshLabPanel>(*m_context);
     m_vulkanInspectorPanel = std::make_unique<VulkanInspectorPanel>(*m_context);
 
-    // Register Viewport Texture for ImGui rendering
+    // Register Viewport Texture for ImGui rendering (initial DS creation)
     m_viewportDS = ImGui_ImplVulkan_AddTexture(
         m_viewportPanel->GetSampler(),
         m_viewportPanel->GetColorImageView(),
@@ -118,19 +255,27 @@ EditorApp::EditorApp()
 EditorApp::~EditorApp() {
     m_context->WaitIdle();
 
+    m_defaultWhiteTexture.reset();
+
+    // Clean up the viewport descriptor set
+    if (m_viewportDS != VK_NULL_HANDLE) {
+        ImGui_ImplVulkan_RemoveTexture(m_viewportDS);
+        m_viewportDS = VK_NULL_HANDLE;
+    }
+
     ImGui_ImplVulkan_Shutdown();
     ImGui_ImplGlfw_Shutdown();
     ImGui::DestroyContext();
 
-    if (m_imguiPool) vkDestroyDescriptorPool(m_context->GetDevice(), m_imguiPool, nullptr);
-    if (m_commandPool) vkDestroyCommandPool(m_context->GetDevice(), m_commandPool, nullptr);
-    if (m_graphicsPipeline) vkDestroyPipeline(m_context->GetDevice(), m_graphicsPipeline, nullptr);
+    if (m_textureDescriptorSetLayout) vkDestroyDescriptorSetLayout(m_context->GetDevice(), m_textureDescriptorSetLayout, nullptr);
+    if (m_imguiPool)         vkDestroyDescriptorPool(m_context->GetDevice(), m_imguiPool, nullptr);
+    if (m_commandPool)       vkDestroyCommandPool(m_context->GetDevice(), m_commandPool, nullptr);
+    if (m_graphicsPipeline)  vkDestroyPipeline(m_context->GetDevice(), m_graphicsPipeline, nullptr);
     if (m_wireframePipeline) vkDestroyPipeline(m_context->GetDevice(), m_wireframePipeline, nullptr);
-    if (m_pipelineLayout) vkDestroyPipelineLayout(m_context->GetDevice(), m_pipelineLayout, nullptr);
+    if (m_pipelineLayout)    vkDestroyPipelineLayout(m_context->GetDevice(), m_pipelineLayout, nullptr);
 }
 
 void EditorApp::InitImGui() {
-    // Create ImGui Descriptor Pool
     VkDescriptorPoolSize poolSizes[] = {
         { VK_DESCRIPTOR_TYPE_SAMPLER, 1000 },
         { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1000 },
@@ -187,13 +332,33 @@ void EditorApp::InitImGui() {
 }
 
 void EditorApp::CreateRenderPipeline() {
+    VkDescriptorSetLayoutBinding samplerLayoutBinding{};
+    samplerLayoutBinding.binding = 0;
+    samplerLayoutBinding.descriptorCount = 1;
+    samplerLayoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    samplerLayoutBinding.pImmutableSamplers = nullptr;
+    samplerLayoutBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+
+    VkDescriptorSetLayoutCreateInfo descriptorLayoutInfo{};
+    descriptorLayoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+    descriptorLayoutInfo.bindingCount = 1;
+    descriptorLayoutInfo.pBindings = &samplerLayoutBinding;
+
+    if (vkCreateDescriptorSetLayout(m_context->GetDevice(), &descriptorLayoutInfo, nullptr, &m_textureDescriptorSetLayout) != VK_SUCCESS) {
+        LOG_ERROR("Failed to create texture descriptor set layout!");
+    }
+
+    m_defaultWhiteTexture = Texture::CreateWhiteTexture(*m_context, m_textureDescriptorSetLayout, *m_descriptorAllocator);
+
     VkPushConstantRange pushConstant{};
-    pushConstant.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
+    pushConstant.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
     pushConstant.offset = 0;
     pushConstant.size = sizeof(PushConstants);
 
     VkPipelineLayoutCreateInfo layoutInfo{};
     layoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+    layoutInfo.setLayoutCount = 1;
+    layoutInfo.pSetLayouts = &m_textureDescriptorSetLayout;
     layoutInfo.pushConstantRangeCount = 1;
     layoutInfo.pPushConstantRanges = &pushConstant;
 
@@ -201,8 +366,6 @@ void EditorApp::CreateRenderPipeline() {
         LOG_ERROR("Failed to create pipeline layout!");
     }
 
-    // Load pre-compiled SPIR-V shaders (compiled from shaders/ by glslc via CMake)
-    // The shaders/compiled/ directory is relative to the working directory (engine root).
     std::vector<uint32_t> vCode = LoadSPIRV("shaders/compiled/mesh.vert.spv");
     std::vector<uint32_t> fCode = LoadSPIRV("shaders/compiled/mesh.frag.spv");
 
@@ -252,27 +415,23 @@ void EditorApp::CreateRenderPipeline() {
 void EditorApp::BuildSampleScene() {
     m_rootNode = std::make_unique<SceneNode>("Scene Root");
 
-    auto cubeNode = std::make_unique<SceneNode>("Cube Node");
-    cubeNode->position = glm::vec3(-1.5f, 0.0f, 0.0f);
+    // Default cube in scene so viewport isn't empty on startup
+    auto cubeNode = std::make_unique<SceneNode>("Cube");
+    cubeNode->mesh = MeshComponent::CreateCube(*m_context, 1.0f);
+    m_activeDisplayMesh = cubeNode->mesh;
     m_rootNode->AddChild(std::move(cubeNode));
 
-    auto sphereNode = std::make_unique<SceneNode>("Sphere Node");
-    sphereNode->position = glm::vec3(1.5f, 0.0f, 0.0f);
-    m_rootNode->AddChild(std::move(sphereNode));
-
-    m_activeDisplayMesh = MeshComponent::CreateCube(*m_context, 1.5f);
-
-    // Create Sample Animation Clip
+    // Sample animation clip — NOT playing on startup (user must press Play)
     auto clip = std::make_shared<AnimationClip>();
     clip->name = "Spin Animation";
     clip->duration = 4.0f;
 
     AnimationTrack track;
-    track.targetNodeName = "Cube Node";
+    track.targetNodeName = "Cube";
     track.positionKeys = {
-        {0.0f, glm::vec3(-1.5f, 0.0f, 0.0f)},
-        {2.0f, glm::vec3(-1.5f, 1.0f, 0.0f)},
-        {4.0f, glm::vec3(-1.5f, 0.0f, 0.0f)}
+        {0.0f, glm::vec3(0.0f, 0.0f, 0.0f)},
+        {2.0f, glm::vec3(0.0f, 1.5f, 0.0f)},
+        {4.0f, glm::vec3(0.0f, 0.0f, 0.0f)}
     };
     track.rotationKeys = {
         {0.0f, glm::quat(glm::vec3(0, 0, 0))},
@@ -282,10 +441,52 @@ void EditorApp::BuildSampleScene() {
     clip->tracks.push_back(track);
 
     m_timeline.SetClip(clip);
-    m_timeline.Play();
+    // Animation starts PAUSED — user must press Play in the Timeline panel
+    m_camera.FocusOnTarget(glm::vec3(0.0f), 3.5f);
+}
+
+// ---------------------------------------------------------------------------
+// Recursive scene graph renderer
+// ---------------------------------------------------------------------------
+void EditorApp::DrawSceneNode(VkCommandBuffer cmd, SceneNode* node, const glm::mat4& parentTransform) {
+    if (!node) return;
+
+    // If this node (or its entire subtree) is invisible, skip it
+    if (!node->visible) return;
+
+    // Compose world transform from parent and this node's local transform
+    glm::mat4 worldTransform = parentTransform * node->GetLocalTransform();
+
+    // Draw the node's mesh (if it has one)
+    if (node->mesh) {
+        VkDescriptorSet textureDS = node->mesh->HasTexture() ?
+            node->mesh->GetTexture()->GetDescriptorSet() :
+            m_defaultWhiteTexture->GetDescriptorSet();
+
+        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, m_pipelineLayout,
+                                0, 1, &textureDS, 0, nullptr);
+
+        PushConstants push{};
+        push.model = worldTransform;
+        push.mvp   = m_camera.GetViewProjectionMatrix() * worldTransform;
+        push.baseColorFactor = node->mesh->GetBaseColorFactor();
+        push.useTexture = node->mesh->HasTexture() ? 1 : 0;
+
+        vkCmdPushConstants(cmd, m_pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
+                           0, sizeof(PushConstants), &push);
+        node->mesh->Draw(cmd);
+    }
+
+    // Recurse into children
+    for (const auto& child : node->GetChildren()) {
+        DrawSceneNode(cmd, child.get(), worldTransform);
+    }
 }
 
 void EditorApp::RenderViewportOffscreen(VkCommandBuffer cmd) {
+    // Guard: don't attempt to render if the framebuffer image view is null
+    if (m_viewportPanel->GetColorImageView() == VK_NULL_HANDLE) return;
+
     m_viewportPanel->TransitionToColorAttachment(cmd);
 
     VkRenderingAttachmentInfo colorAttachment{};
@@ -317,7 +518,7 @@ void EditorApp::RenderViewportOffscreen(VkCommandBuffer cmd) {
     VkViewport viewport{};
     viewport.x = 0.0f;
     viewport.y = 0.0f;
-    viewport.width = static_cast<float>(m_viewportPanel->GetWidth());
+    viewport.width  = static_cast<float>(m_viewportPanel->GetWidth());
     viewport.height = static_cast<float>(m_viewportPanel->GetHeight());
     viewport.minDepth = 0.0f;
     viewport.maxDepth = 1.0f;
@@ -330,13 +531,9 @@ void EditorApp::RenderViewportOffscreen(VkCommandBuffer cmd) {
 
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, m_graphicsPipeline);
 
-    if (m_activeDisplayMesh) {
-        PushConstants push{};
-        push.model = glm::mat4(1.0f);
-        push.mvp = m_camera.GetViewProjectionMatrix() * push.model;
-        vkCmdPushConstants(cmd, m_pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(PushConstants), &push);
-
-        m_activeDisplayMesh->Draw(cmd);
+    // Traverse the entire scene graph — each node renders with its own world transform
+    if (m_rootNode) {
+        DrawSceneNode(cmd, m_rootNode.get(), glm::mat4(1.0f));
     }
 
     vkCmdEndRendering(cmd);
@@ -353,8 +550,6 @@ void EditorApp::RecordCommandBuffer(VkCommandBuffer cmd, uint32_t imageIndex) {
     RenderViewportOffscreen(cmd);
 
     // 2. Transition swapchain image: UNDEFINED -> COLOR_ATTACHMENT_OPTIMAL
-    // Swapchain images are acquired in UNDEFINED layout and must be explicitly
-    // transitioned before we use them as a color attachment.
     {
         VkImageMemoryBarrier barrier{};
         barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
@@ -381,19 +576,18 @@ void EditorApp::RecordCommandBuffer(VkCommandBuffer cmd, uint32_t imageIndex) {
     swapchainColorAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
     swapchainColorAttachment.clearValue.color = { 0.05f, 0.05f, 0.05f, 1.0f };
 
-    VkRenderingInfo renderingInfo{};
-    renderingInfo.sType = VK_STRUCTURE_TYPE_RENDERING_INFO;
-    renderingInfo.renderArea = { {0, 0}, m_swapchain->GetExtent() };
-    renderingInfo.layerCount = 1;
-    renderingInfo.colorAttachmentCount = 1;
-    renderingInfo.pColorAttachments = &swapchainColorAttachment;
+    VkRenderingInfo imguiRenderingInfo{};
+    imguiRenderingInfo.sType = VK_STRUCTURE_TYPE_RENDERING_INFO;
+    imguiRenderingInfo.renderArea = { {0, 0}, m_swapchain->GetExtent() };
+    imguiRenderingInfo.layerCount = 1;
+    imguiRenderingInfo.colorAttachmentCount = 1;
+    imguiRenderingInfo.pColorAttachments = &swapchainColorAttachment;
 
-    vkCmdBeginRendering(cmd, &renderingInfo);
+    vkCmdBeginRendering(cmd, &imguiRenderingInfo);
     ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), cmd);
     vkCmdEndRendering(cmd);
 
     // 4. Transition swapchain image: COLOR_ATTACHMENT_OPTIMAL -> PRESENT_SRC_KHR
-    // Must be in PRESENT_SRC_KHR layout before vkQueuePresentKHR.
     {
         VkImageMemoryBarrier barrier{};
         barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
@@ -425,7 +619,7 @@ void EditorApp::Run() {
         float deltaTime = std::chrono::duration<float, std::chrono::seconds::period>(currentTime - lastTime).count();
         lastTime = currentTime;
 
-        // Update Animation System
+        // Update Animation System (only ticks when m_timeline.IsPlaying() == true)
         m_timeline.Update(deltaTime, m_rootNode.get());
 
         // Acquire Swapchain Image
@@ -442,27 +636,22 @@ void EditorApp::Run() {
         ImGui::NewFrame();
 
         ImGuiID dockspaceID = ImGui::DockSpaceOverViewport(0, ImGui::GetMainViewport());
-        static bool firstFrame = true;
-        if (firstFrame) {
-            firstFrame = false;
-            BuildDefaultDockLayout(dockspaceID);
+        RenderMainMenuBar(dockspaceID);
+
+        if (m_rebuildLayout) {
+            m_rebuildLayout = false;
+            ApplyDockLayout(dockspaceID);
         }
 
-        // Render UI Panels
-        VkImageView prevView = m_viewportPanel->GetColorImageView();
-        m_viewportPanel->RenderUI(m_camera, m_viewportDS);
-        if (m_viewportPanel->GetColorImageView() != prevView) {
-            // Framebuffer was recreated — update ImGui texture descriptor
-            m_context->WaitIdle();
-            m_viewportDS = ImGui_ImplVulkan_AddTexture(
-                m_viewportPanel->GetSampler(),
-                m_viewportPanel->GetColorImageView(),
-                VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
-            );
-        }
-        m_sceneTreePanel->RenderUI(m_rootNode.get());
+        // Render UI panels
+        // NOTE: m_viewportDS is passed by reference — ViewportPanel::RenderUI may update it
+        // atomically (destroy old + create new) when the framebuffer is resized, guaranteeing
+        // ImGui::Image always gets a valid descriptor set.
+        m_viewportPanel->RenderUI(m_camera, m_viewportDS, deltaTime,
+                                  m_activeDisplayMesh.get(), m_rootNode.get());
+
+        m_sceneTreePanel->RenderUI(m_rootNode.get(), m_activeDisplayMesh);
         m_timelinePanel->RenderUI(m_timeline);
-        m_meshLabPanel->RenderUI(m_activeDisplayMesh);
         m_vulkanInspectorPanel->RenderUI(*m_swapchain);
         RenderEngineLogConsole();
 
@@ -489,12 +678,16 @@ void EditorApp::Run() {
         submitInfo.signalSemaphoreCount = 1;
         submitInfo.pSignalSemaphores = signalSemaphores;
 
-        if (vkQueueSubmit(m_context->GetGraphicsQueue(), 1, &submitInfo, m_swapchain->GetInFlightFence(currentFrame)) != VK_SUCCESS) {
-            LOG_ERROR("Failed to submit draw command buffer!");
+        VkResult submitResult = vkQueueSubmit(m_context->GetGraphicsQueue(), 1, &submitInfo,
+                                              m_swapchain->GetInFlightFence(currentFrame));
+        if (submitResult != VK_SUCCESS) {
+            LOG_ERROR("Failed to submit draw command buffer! VkResult = "
+                      + std::to_string(static_cast<int>(submitResult)));
         }
 
         VkResult presentResult = m_swapchain->Present(imageIndex);
-        if (presentResult == VK_ERROR_OUT_OF_DATE_KHR || presentResult == VK_SUBOPTIMAL_KHR || m_window.WasResized()) {
+        if (presentResult == VK_ERROR_OUT_OF_DATE_KHR || presentResult == VK_SUBOPTIMAL_KHR
+            || m_window.WasResized()) {
             m_window.ResetResizedFlag();
             m_swapchain->Recreate(m_window.GetWidth(), m_window.GetHeight());
         }

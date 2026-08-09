@@ -3,9 +3,11 @@
 #include <volk.h>
 #include <glm/glm.hpp>
 #include <vector>
-#include <memory>
 #include "../vulkan/Buffer.h"
 #include "../vulkan/VulkanContext.h"
+#include "../vulkan/Texture.h"
+
+class Texture;
 
 struct Vertex {
     glm::vec3 position;
@@ -72,6 +74,15 @@ public:
     VkBuffer GetVertexBuffer() const { return m_vertexBuffer->GetBuffer(); }
     VkBuffer GetIndexBuffer() const { return m_indexBuffer->GetBuffer(); }
 
+    void SetTexture(std::shared_ptr<Texture> texture) { m_texture = texture; }
+    std::shared_ptr<Texture> GetTexture() const { return m_texture; }
+    void SetBaseColorFactor(const glm::vec4& color) { m_baseColorFactor = color; }
+    const glm::vec4& GetBaseColorFactor() const { return m_baseColorFactor; }
+    bool HasTexture() const { return m_texture != nullptr; }
+
+    glm::vec3 GetBoundingBoxCenter() const;
+    float GetBoundingBoxRadius() const;
+
     void Draw(VkCommandBuffer cmd) const;
 
     // Standard Primitive Factory Generators
@@ -84,6 +95,9 @@ private:
     VulkanContext& m_context;
     std::vector<Vertex> m_vertices;
     std::vector<uint32_t> m_indices;
+
+    std::shared_ptr<Texture> m_texture = nullptr;
+    glm::vec4 m_baseColorFactor{1.0f, 1.0f, 1.0f, 1.0f};
 
     std::unique_ptr<Buffer> m_vertexBuffer;
     std::unique_ptr<Buffer> m_indexBuffer;

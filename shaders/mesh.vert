@@ -3,6 +3,8 @@
 layout(push_constant) uniform PushConstants {
     mat4 mvp;
     mat4 model;
+    vec4 baseColorFactor;
+    int useTexture;
 } pc;
 
 layout(location = 0) in vec3 inPosition;

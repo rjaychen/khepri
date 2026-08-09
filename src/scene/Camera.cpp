@@ -3,11 +3,10 @@
 
 Camera::Camera(glm::vec3 eye, glm::vec3 target)
     : m_position(eye), m_target(target) {
-    glm::vec3 dir = glm::normalize(eye - target);
-    m_distance = glm::length(eye - target);
-    m_pitch = glm::degrees(asin(dir.y));
-    m_yaw = glm::degrees(atan2(dir.z, dir.x));
-    UpdateVectors();
+    glm::vec3 forward = glm::normalize(target - eye);
+    m_distance = std::max(0.1f, glm::length(eye - target));
+    m_pitch = glm::degrees(asin(forward.y));
+    m_yaw = glm::degrees(atan2(forward.z, forward.x));
 }
 
 void Camera::SetPerspective(float fovDegrees, float aspect, float zNear, float zFar) {
@@ -64,14 +63,56 @@ void Camera::Zoom(float deltaZoom) {
     UpdateVectors();
 }
 
+void Camera::Look(float deltaX, float deltaY) {
+    float sensitivity = 0.15f;
+    m_yaw += deltaX * sensitivity;
+    m_pitch -= deltaY * sensitivity;
+    m_pitch = std::clamp(m_pitch, -89.0f, 89.0f);
+
+    float radYaw = glm::radians(m_yaw);
+    float radPitch = glm::radians(m_pitch);
+
+    glm::vec3 viewDir;
+    viewDir.x = cos(radYaw) * cos(radPitch);
+    viewDir.y = sin(radPitch);
+    viewDir.z = sin(radYaw) * cos(radPitch);
+    viewDir = glm::normalize(viewDir);
+
+    m_target = m_position + viewDir * m_distance;
+}
+
+void Camera::Fly(glm::vec3 moveDir, float deltaTime) {
+    if (glm::length(moveDir) < 0.001f) return;
+
+    glm::vec3 forward = glm::normalize(m_target - m_position);
+    glm::vec3 right = glm::normalize(glm::cross(forward, m_up));
+    glm::vec3 up = m_up;
+
+    glm::vec3 velocity = (forward * moveDir.z + right * moveDir.x + up * moveDir.y) * m_flySpeed * deltaTime;
+    m_position += velocity;
+    m_target += velocity;
+}
+
+void Camera::AdjustFlySpeed(float deltaSpeed) {
+    m_flySpeed += deltaSpeed * 0.5f;
+    if (m_flySpeed < 0.2f) m_flySpeed = 0.2f;
+    if (m_flySpeed > 100.0f) m_flySpeed = 100.0f;
+}
+
+void Camera::FocusOnTarget(glm::vec3 target, float distance) {
+    m_target = target;
+    m_distance = std::max(0.5f, distance);
+    UpdateVectors();
+}
+
 void Camera::UpdateVectors() {
     float radYaw = glm::radians(m_yaw);
     float radPitch = glm::radians(m_pitch);
 
-    glm::vec3 dir;
-    dir.x = cos(radYaw) * cos(radPitch);
-    dir.y = sin(radPitch);
-    dir.z = sin(radYaw) * cos(radPitch);
+    glm::vec3 viewDir;
+    viewDir.x = cos(radYaw) * cos(radPitch);
+    viewDir.y = sin(radPitch);
+    viewDir.z = sin(radYaw) * cos(radPitch);
 
-    m_position = m_target + glm::normalize(dir) * m_distance;
+    m_position = m_target - glm::normalize(viewDir) * m_distance;
 }

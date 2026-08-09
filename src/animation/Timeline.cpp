@@ -84,32 +84,32 @@ void Timeline::Update(float deltaTime, SceneNode* rootSceneNode, Skeleton* skele
                 m_isPlaying = false;
             }
         }
-    }
 
-    for (const auto& track : m_clip->tracks) {
-        SceneNode* targetNode = FindNodeByName(rootSceneNode, track.targetNodeName);
-        if (targetNode) {
-            if (!track.positionKeys.empty()) {
-                targetNode->position = track.SamplePosition(m_currentTime);
+        // Apply animation transforms ONLY while playing.
+        // Keeping this inside the if block prevents overriding manual Inspector edits when paused.
+        for (const auto& track : m_clip->tracks) {
+            SceneNode* targetNode = FindNodeByName(rootSceneNode, track.targetNodeName);
+            if (targetNode) {
+                if (!track.positionKeys.empty())
+                    targetNode->position = track.SamplePosition(m_currentTime);
+                if (!track.rotationKeys.empty()) {
+                    glm::quat q = track.SampleRotation(m_currentTime);
+                    targetNode->rotationDegrees = glm::degrees(glm::eulerAngles(q));
+                }
+                if (!track.scaleKeys.empty())
+                    targetNode->scale = track.SampleScale(m_currentTime);
+                targetNode->SyncPropertiesToTransform();
             }
-            if (!track.rotationKeys.empty()) {
-                glm::quat q = track.SampleRotation(m_currentTime);
-                targetNode->rotationDegrees = glm::degrees(glm::eulerAngles(q));
-            }
-            if (!track.scaleKeys.empty()) {
-                targetNode->scale = track.SampleScale(m_currentTime);
-            }
-            targetNode->SyncPropertiesToTransform();
-        }
 
-        if (skeleton) {
-            int32_t jIdx = skeleton->FindJointIndex(track.targetNodeName);
-            if (jIdx >= 0) {
-                Joint* joint = skeleton->GetJoint(jIdx);
-                if (joint) {
-                    if (!track.positionKeys.empty()) joint->position = track.SamplePosition(m_currentTime);
-                    if (!track.rotationKeys.empty()) joint->rotation = track.SampleRotation(m_currentTime);
-                    if (!track.scaleKeys.empty()) joint->scale = track.SampleScale(m_currentTime);
+            if (skeleton) {
+                int32_t jIdx = skeleton->FindJointIndex(track.targetNodeName);
+                if (jIdx >= 0) {
+                    Joint* joint = skeleton->GetJoint(jIdx);
+                    if (joint) {
+                        if (!track.positionKeys.empty()) joint->position = track.SamplePosition(m_currentTime);
+                        if (!track.rotationKeys.empty()) joint->rotation = track.SampleRotation(m_currentTime);
+                        if (!track.scaleKeys.empty())    joint->scale    = track.SampleScale(m_currentTime);
+                    }
                 }
             }
         }

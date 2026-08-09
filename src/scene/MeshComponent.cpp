@@ -38,60 +38,90 @@ MeshComponent::MeshComponent(VulkanContext& context, const std::vector<Vertex>& 
     Buffer::CopyBuffer(context, stagingIndex.GetBuffer(), m_indexBuffer->GetBuffer(), indexSize);
 }
 
+glm::vec3 MeshComponent::GetBoundingBoxCenter() const {
+    if (m_vertices.empty()) return glm::vec3(0.0f);
+    glm::vec3 minP = m_vertices[0].position;
+    glm::vec3 maxP = m_vertices[0].position;
+    for (const auto& v : m_vertices) {
+        minP = glm::min(minP, v.position);
+        maxP = glm::max(maxP, v.position);
+    }
+    return (minP + maxP) * 0.5f;
+}
+
+float MeshComponent::GetBoundingBoxRadius() const {
+    if (m_vertices.empty()) return 1.0f;
+    glm::vec3 minP = m_vertices[0].position;
+    glm::vec3 maxP = m_vertices[0].position;
+    for (const auto& v : m_vertices) {
+        minP = glm::min(minP, v.position);
+        maxP = glm::max(maxP, v.position);
+    }
+    return std::max(0.5f, glm::length(maxP - minP) * 0.5f);
+}
+
 void MeshComponent::Draw(VkCommandBuffer cmd) const {
     if (!m_vertexBuffer || !m_indexBuffer || m_indices.empty()) return;
-    VkBuffer vertexBuffers[] = { m_vertexBuffer->GetBuffer() };
+
+    VkBuffer vBufs[] = { m_vertexBuffer->GetBuffer() };
     VkDeviceSize offsets[] = { 0 };
-    vkCmdBindVertexBuffers(cmd, 0, 1, vertexBuffers, offsets);
+    vkCmdBindVertexBuffers(cmd, 0, 1, vBufs, offsets);
     vkCmdBindIndexBuffer(cmd, m_indexBuffer->GetBuffer(), 0, VK_INDEX_TYPE_UINT32);
+
     vkCmdDrawIndexed(cmd, static_cast<uint32_t>(m_indices.size()), 1, 0, 0, 0);
 }
 
 std::shared_ptr<MeshComponent> MeshComponent::CreateCube(VulkanContext& context, float size) {
     float h = size * 0.5f;
-    std::vector<Vertex> vertices = {
-        // Front (+Z)
-        { {-h, -h,  h}, {0, 0, 1}, {1, 0, 0, 1}, {0, 1} },
-        { { h, -h,  h}, {0, 0, 1}, {1, 0, 0, 1}, {1, 1} },
-        { { h,  h,  h}, {0, 0, 1}, {1, 0, 0, 1}, {1, 0} },
-        { {-h,  h,  h}, {0, 0, 1}, {1, 0, 0, 1}, {0, 0} },
-        // Back (-Z)
-        { { h, -h, -h}, {0, 0, -1}, {-1, 0, 0, 1}, {0, 1} },
-        { {-h, -h, -h}, {0, 0, -1}, {-1, 0, 0, 1}, {1, 1} },
-        { {-h,  h, -h}, {0, 0, -1}, {-1, 0, 0, 1}, {1, 0} },
-        { { h,  h, -h}, {0, 0, -1}, {-1, 0, 0, 1}, {0, 0} },
-        // Top (+Y)
-        { {-h,  h,  h}, {0, 1, 0}, {1, 0, 0, 1}, {0, 1} },
-        { { h,  h,  h}, {0, 1, 0}, {1, 0, 0, 1}, {1, 1} },
-        { { h,  h, -h}, {0, 1, 0}, {1, 0, 0, 1}, {1, 0} },
-        { {-h,  h, -h}, {0, 1, 0}, {1, 0, 0, 1}, {0, 0} },
-        // Bottom (-Y)
-        { {-h, -h, -h}, {0, -1, 0}, {1, 0, 0, 1}, {0, 1} },
-        { { h, -h, -h}, {0, -1, 0}, {1, 0, 0, 1}, {1, 1} },
-        { { h, -h,  h}, {0, -1, 0}, {1, 0, 0, 1}, {1, 0} },
-        { {-h, -h,  h}, {0, -1, 0}, {1, 0, 0, 1}, {0, 0} },
-        // Right (+X)
-        { { h, -h,  h}, {1, 0, 0}, {0, 0, -1, 1}, {0, 1} },
-        { { h, -h, -h}, {1, 0, 0}, {0, 0, -1, 1}, {1, 1} },
-        { { h,  h, -h}, {1, 0, 0}, {0, 0, -1, 1}, {1, 0} },
-        { { h,  h,  h}, {1, 0, 0}, {0, 0, -1, 1}, {0, 0} },
-        // Left (-X)
-        { {-h, -h, -h}, {-1, 0, 0}, {0, 0, 1, 1}, {0, 1} },
-        { {-h, -h,  h}, {-1, 0, 0}, {0, 0, 1, 1}, {1, 1} },
-        { {-h,  h,  h}, {-1, 0, 0}, {0, 0, 1, 1}, {1, 0} },
-        { {-h,  h, -h}, {-1, 0, 0}, {0, 0, 1, 1}, {0, 0} }
+    auto makeV = [](glm::vec3 p, glm::vec3 n, glm::vec2 uv) {
+        Vertex v{};
+        v.position = p;
+        v.normal = n;
+        v.uv = uv;
+        return v;
     };
 
-    std::vector<uint32_t> indices;
-    for (uint32_t i = 0; i < 6; i++) {
-        uint32_t offset = i * 4;
-        indices.push_back(offset + 0);
-        indices.push_back(offset + 1);
-        indices.push_back(offset + 2);
-        indices.push_back(offset + 2);
-        indices.push_back(offset + 3);
-        indices.push_back(offset + 0);
-    }
+    std::vector<Vertex> vertices = {
+        // Front face (+Z)
+        makeV({-h, -h,  h}, { 0.0f,  0.0f,  1.0f}, {0.0f, 0.0f}),
+        makeV({ h, -h,  h}, { 0.0f,  0.0f,  1.0f}, {1.0f, 0.0f}),
+        makeV({ h,  h,  h}, { 0.0f,  0.0f,  1.0f}, {1.0f, 1.0f}),
+        makeV({-h,  h,  h}, { 0.0f,  0.0f,  1.0f}, {0.0f, 1.0f}),
+        // Back face (-Z)
+        makeV({ h, -h, -h}, { 0.0f,  0.0f, -1.0f}, {0.0f, 0.0f}),
+        makeV({-h, -h, -h}, { 0.0f,  0.0f, -1.0f}, {1.0f, 0.0f}),
+        makeV({-h,  h, -h}, { 0.0f,  0.0f, -1.0f}, {1.0f, 1.0f}),
+        makeV({ h,  h, -h}, { 0.0f,  0.0f, -1.0f}, {0.0f, 1.0f}),
+        // Top face (+Y)
+        makeV({-h,  h,  h}, { 0.0f,  1.0f,  0.0f}, {0.0f, 0.0f}),
+        makeV({ h,  h,  h}, { 0.0f,  1.0f,  0.0f}, {1.0f, 0.0f}),
+        makeV({ h,  h, -h}, { 0.0f,  1.0f,  0.0f}, {1.0f, 1.0f}),
+        makeV({-h,  h, -h}, { 0.0f,  1.0f,  0.0f}, {0.0f, 1.0f}),
+        // Bottom face (-Y)
+        makeV({-h, -h, -h}, { 0.0f, -1.0f,  0.0f}, {0.0f, 0.0f}),
+        makeV({ h, -h, -h}, { 0.0f, -1.0f,  0.0f}, {1.0f, 0.0f}),
+        makeV({ h, -h,  h}, { 0.0f, -1.0f,  0.0f}, {1.0f, 1.0f}),
+        makeV({-h, -h,  h}, { 0.0f, -1.0f,  0.0f}, {0.0f, 1.0f}),
+        // Right face (+X)
+        makeV({ h, -h,  h}, { 1.0f,  0.0f,  0.0f}, {0.0f, 0.0f}),
+        makeV({ h, -h, -h}, { 1.0f,  0.0f,  0.0f}, {1.0f, 0.0f}),
+        makeV({ h,  h, -h}, { 1.0f,  0.0f,  0.0f}, {1.0f, 1.0f}),
+        makeV({ h,  h,  h}, { 1.0f,  0.0f,  0.0f}, {0.0f, 1.0f}),
+        // Left face (-X)
+        makeV({-h, -h, -h}, {-1.0f,  0.0f,  0.0f}, {0.0f, 0.0f}),
+        makeV({-h, -h,  h}, {-1.0f,  0.0f,  0.0f}, {1.0f, 0.0f}),
+        makeV({-h,  h,  h}, {-1.0f,  0.0f,  0.0f}, {1.0f, 1.0f}),
+        makeV({-h,  h, -h}, {-1.0f,  0.0f,  0.0f}, {0.0f, 1.0f})
+    };
+
+    std::vector<uint32_t> indices = {
+         0, 1, 2,  2, 3, 0,
+         4, 5, 6,  6, 7, 4,
+         8, 9,10, 10,11, 8,
+        12,13,14, 14,15,12,
+        16,17,18, 18,19,16,
+        20,21,22, 22,23,20
+    };
 
     return std::make_shared<MeshComponent>(context, vertices, indices);
 }
@@ -149,33 +179,31 @@ std::shared_ptr<MeshComponent> MeshComponent::CreatePlane(VulkanContext& context
     std::vector<Vertex> vertices;
     std::vector<uint32_t> indices;
 
+    float halfSize = size * 0.5f;
     float step = size / subdivisions;
-    float half = size * 0.5f;
 
-    for (uint32_t i = 0; i <= subdivisions; ++i) {
-        float z = -half + i * step;
-        for (uint32_t j = 0; j <= subdivisions; ++j) {
-            float x = -half + j * step;
+    for (uint32_t z = 0; z <= subdivisions; ++z) {
+        for (uint32_t x = 0; x <= subdivisions; ++x) {
             Vertex v;
-            v.position = glm::vec3(x, 0.0f, z);
+            v.position = glm::vec3(-halfSize + x * step, 0.0f, -halfSize + z * step);
             v.normal = glm::vec3(0.0f, 1.0f, 0.0f);
-            v.uv = glm::vec2((float)j / subdivisions, (float)i / subdivisions);
+            v.uv = glm::vec2((float)x / subdivisions, (float)z / subdivisions);
             vertices.push_back(v);
         }
     }
 
-    for (uint32_t i = 0; i < subdivisions; ++i) {
-        for (uint32_t j = 0; j < subdivisions; ++j) {
-            uint32_t row1 = i * (subdivisions + 1);
-            uint32_t row2 = (i + 1) * (subdivisions + 1);
+    for (uint32_t z = 0; z < subdivisions; ++z) {
+        for (uint32_t x = 0; x < subdivisions; ++x) {
+            uint32_t row1 = z * (subdivisions + 1);
+            uint32_t row2 = (z + 1) * (subdivisions + 1);
 
-            indices.push_back(row1 + j);
-            indices.push_back(row2 + j);
-            indices.push_back(row1 + j + 1);
+            indices.push_back(row1 + x);
+            indices.push_back(row2 + x);
+            indices.push_back(row1 + x + 1);
 
-            indices.push_back(row1 + j + 1);
-            indices.push_back(row2 + j);
-            indices.push_back(row2 + j + 1);
+            indices.push_back(row1 + x + 1);
+            indices.push_back(row2 + x);
+            indices.push_back(row2 + x + 1);
         }
     }
 
@@ -189,7 +217,7 @@ std::shared_ptr<MeshComponent> MeshComponent::CreateCylinder(VulkanContext& cont
     float sectorStep = 2.0f * glm::pi<float>() / sectors;
     float h2 = height * 0.5f;
 
-    // Side vertices
+    // 1. Side Quad Strip
     for (uint32_t i = 0; i <= sectors; ++i) {
         float angle = i * sectorStep;
         float x = radius * cosf(angle);
@@ -222,6 +250,58 @@ std::shared_ptr<MeshComponent> MeshComponent::CreateCylinder(VulkanContext& cont
         indices.push_back(top2);
         indices.push_back(bot1);
         indices.push_back(bot2);
+    }
+
+    // 2. Top Cap Center & Fan Vertices
+    uint32_t topCenterIndex = static_cast<uint32_t>(vertices.size());
+    Vertex topCenter;
+    topCenter.position = glm::vec3(0.0f, h2, 0.0f);
+    topCenter.normal = glm::vec3(0.0f, 1.0f, 0.0f);
+    topCenter.uv = glm::vec2(0.5f, 0.5f);
+    vertices.push_back(topCenter);
+
+    uint32_t topRingStart = static_cast<uint32_t>(vertices.size());
+    for (uint32_t i = 0; i <= sectors; ++i) {
+        float angle = i * sectorStep;
+        float x = radius * cosf(angle);
+        float z = radius * sinf(angle);
+        Vertex v;
+        v.position = glm::vec3(x, h2, z);
+        v.normal = glm::vec3(0.0f, 1.0f, 0.0f);
+        v.uv = glm::vec2(0.5f + 0.5f * cosf(angle), 0.5f + 0.5f * sinf(angle));
+        vertices.push_back(v);
+    }
+
+    for (uint32_t i = 0; i < sectors; ++i) {
+        indices.push_back(topCenterIndex);
+        indices.push_back(topRingStart + i + 1);
+        indices.push_back(topRingStart + i);
+    }
+
+    // 3. Bottom Cap Center & Fan Vertices
+    uint32_t botCenterIndex = static_cast<uint32_t>(vertices.size());
+    Vertex botCenter;
+    botCenter.position = glm::vec3(0.0f, -h2, 0.0f);
+    botCenter.normal = glm::vec3(0.0f, -1.0f, 0.0f);
+    botCenter.uv = glm::vec2(0.5f, 0.5f);
+    vertices.push_back(botCenter);
+
+    uint32_t botRingStart = static_cast<uint32_t>(vertices.size());
+    for (uint32_t i = 0; i <= sectors; ++i) {
+        float angle = i * sectorStep;
+        float x = radius * cosf(angle);
+        float z = radius * sinf(angle);
+        Vertex v;
+        v.position = glm::vec3(x, -h2, z);
+        v.normal = glm::vec3(0.0f, -1.0f, 0.0f);
+        v.uv = glm::vec2(0.5f + 0.5f * cosf(angle), 0.5f + 0.5f * sinf(angle));
+        vertices.push_back(v);
+    }
+
+    for (uint32_t i = 0; i < sectors; ++i) {
+        indices.push_back(botCenterIndex);
+        indices.push_back(botRingStart + i);
+        indices.push_back(botRingStart + i + 1);
     }
 
     return std::make_shared<MeshComponent>(context, vertices, indices);
