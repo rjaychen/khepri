@@ -68,7 +68,8 @@ void EditorApp::LoadSampleModel(const std::string& name) {
 void EditorApp::RenderMainMenuBar(ImGuiID dockspaceID) {
     (void)dockspaceID;
     if (ImGui::BeginMainMenuBar()) {
-        ImGui::TextColored(ImVec4(0.3f, 0.8f, 1.0f, 1.0f), "Khepri Engine v1.0");
+        std::string versionTitle = std::string("Khepri Engine v") + KhepriEngine::VERSION_STRING;
+        ImGui::TextColored(ImVec4(0.3f, 0.8f, 1.0f, 1.0f), "%s", versionTitle.c_str());
         ImGui::Separator();
 
         if (ImGui::BeginMenu("File")) {

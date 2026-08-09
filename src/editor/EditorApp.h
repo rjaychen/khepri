@@ -1,6 +1,7 @@
 #pragma once
 
 #include "../core/Window.h"
+#include "../core/Version.h"
 #include "../vulkan/VulkanContext.h"
 #include "../vulkan/Swapchain.h"
 #include "../vulkan/Descriptors.h"

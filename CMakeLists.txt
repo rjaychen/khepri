@@ -1,8 +1,8 @@
 cmake_minimum_required(VERSION 3.20)
 set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
-project(KhepriEngine VERSION 1.0 LANGUAGES C CXX)
+project(KhepriEngine VERSION 0.1.1 LANGUAGES C CXX)
 
-set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # Configure FetchContent
@@ -121,7 +121,7 @@ target_link_libraries(KhepriEngine PRIVATE
 )
 
 if(MSVC)
-    target_compile_options(KhepriEngine PRIVATE /W4 /utf-8)
+    target_compile_options(KhepriEngine PRIVATE /W4 /utf-8 /FS)
 endif()
 
 # -------------------------------------------------------
@@ -169,4 +169,62 @@ if(GLSLC)
     message(STATUS "Shader auto-compilation and post-build copying enabled")
 else()
     message(WARNING "glslc not found - shaders will NOT be compiled automatically. Install Vulkan SDK.")
+endif()
+
+# -------------------------------------------------------
+# Unit Testing Framework (GoogleTest)
+# -------------------------------------------------------
+option(BUILD_TESTS "Build unit tests" ON)
+if(BUILD_TESTS)
+    message(STATUS "Fetching GoogleTest...")
+    FetchContent_Declare(
+        googletest
+        URL https://github.com/google/googletest/archive/refs/tags/v1.14.0.zip
+    )
+    set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
+    FetchContent_MakeAvailable(googletest)
+    enable_testing()
+
+    add_executable(KhepriEngineTests
+        tests/MainTests.cpp
+        tests/HalfEdgeTests.cpp
+        src/mesh/HalfEdgeMesh.cpp
+        src/mesh/CDT.cpp
+        src/mesh/ExactPredicates.cpp
+        src/mesh/MeshBoolean.cpp
+        src/scene/SceneNode.cpp
+        src/scene/MeshComponent.cpp
+        src/animation/Timeline.cpp
+        src/animation/Rigging.cpp
+        src/vulkan/Buffer.cpp
+        src/vulkan/Descriptors.cpp
+        src/vulkan/Texture.cpp
+        src/vulkan/VulkanContext.cpp
+    )
+
+    target_include_directories(KhepriEngineTests PRIVATE
+        src
+        ${glfw_SOURCE_DIR}/include
+        ${vulkan_headers_SOURCE_DIR}/include
+        ${vma_SOURCE_DIR}/include
+        ${stb_SOURCE_DIR}
+    )
+
+    target_compile_definitions(KhepriEngineTests PRIVATE VK_NO_PROTOTYPES GLM_FORCE_RADIANS GLM_FORCE_DEPTH_ZERO_TO_ONE)
+
+    target_link_libraries(KhepriEngineTests PRIVATE
+        gmock
+        gtest_main
+        glfw
+        volk
+        Vulkan-Headers
+        glm::glm
+    )
+
+    if(MSVC)
+        target_compile_options(KhepriEngineTests PRIVATE /W4 /utf-8 /FS)
+    endif()
+
+    include(GoogleTest)
+    gtest_discover_tests(KhepriEngineTests)
 endif()

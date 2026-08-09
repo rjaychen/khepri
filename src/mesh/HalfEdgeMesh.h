@@ -58,6 +58,9 @@ public:
 
     uint32_t GetEulerCharacteristic() const;
 
+    uint32_t GetFaceAcross(uint32_t edgeIdx);
+    std::vector<uint32_t> GetVertexNeighbors(uint32_t vertexIdx);
+
 private:
     std::vector<HE_Vertex> m_vertices;
     std::vector<HE_HalfEdge> m_halfEdges;
