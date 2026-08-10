@@ -2,6 +2,7 @@
 #include "../core/Logger.h"
 #include "../core/FileDialog.h"
 #include "../mesh/GLTFImporter.h"
+#include "../assets/AssetManager.h"
 #include <glm/gtc/matrix_transform.hpp>
 #include <chrono>
 #include <fstream>
@@ -26,6 +27,7 @@ void EditorApp::ApplyDockLayout(ImGuiID dockspaceID) {
     ImGui::DockBuilderDockWindow("Vulkan Educational Inspector", dockRightBottom);
     ImGui::DockBuilderDockWindow("Animation Timeline", dockBottom);
     ImGui::DockBuilderDockWindow("Engine Log Console", dockBottom);
+    ImGui::DockBuilderDockWindow("Procedural Node Graph Editor", dockBottom);
 
     ImGui::DockBuilderFinish(dockspaceID);
 }
@@ -34,10 +36,10 @@ void EditorApp::SetEditorMode(EditorMode mode) {
     m_currentMode = mode;
 }
 
-void EditorApp::LoadGLTFModel(const std::string& path) {
+void EditorApp::OpenSceneModel(const std::string& path) {
     m_context->WaitIdle();
     VkBuffer lightBuf = m_lightUBOBuffer ? m_lightUBOBuffer->GetBuffer() : VK_NULL_HANDLE;
-    auto loadedNode = GLTFImporter::LoadFromFile(*m_context, path, m_textureDescriptorSetLayout, m_descriptorAllocator.get(), lightBuf);
+    auto loadedNode = ModelImporter::LoadFromFile(*m_context, path, m_textureDescriptorSetLayout, m_descriptorAllocator.get(), lightBuf);
     if (loadedNode) {
         m_rootNode = loadedNode;
 
@@ -52,18 +54,57 @@ void EditorApp::LoadGLTFModel(const std::string& path) {
         const auto& children = m_rootNode->GetChildren();
         if (!children.empty() && children[0]->mesh) {
             m_activeDisplayMesh = children[0]->mesh;
+            if (m_nodeGraphEditorPanel) {
+                m_nodeGraphEditorPanel->SetImportedMesh(m_activeDisplayMesh);
+            }
         }
         m_camera.FocusOnTarget(glm::vec3(0.0f), 4.0f);
-        LOG_INFO("Loaded model into scene: " + path);
+        LOG_INFO("Opened new scene from model: " + path);
     } else {
-        LOG_ERROR("Failed to load glTF model from: " + path);
+        LOG_ERROR("Failed to open scene model from: " + path);
+    }
+}
+
+void EditorApp::ImportModelIntoScene(const std::string& path) {
+    m_context->WaitIdle();
+    VkBuffer lightBuf = m_lightUBOBuffer ? m_lightUBOBuffer->GetBuffer() : VK_NULL_HANDLE;
+    auto loadedNode = ModelImporter::LoadFromFile(*m_context, path, m_textureDescriptorSetLayout, m_descriptorAllocator.get(), lightBuf);
+    if (loadedNode) {
+        if (!m_rootNode) {
+            m_rootNode = std::make_shared<SceneNode>("Scene Root");
+        }
+
+        const auto& loadedChildren = loadedNode->GetChildren();
+        if (!loadedChildren.empty()) {
+            for (const auto& child : loadedChildren) {
+                if (child->mesh) {
+                    m_activeDisplayMesh = child->mesh;
+                    auto importedChild = std::make_unique<SceneNode>(child->name);
+                    importedChild->mesh = child->mesh;
+                    m_rootNode->AddChild(std::move(importedChild));
+                }
+            }
+        } else if (loadedNode->mesh) {
+            m_activeDisplayMesh = loadedNode->mesh;
+            auto importedChild = std::make_unique<SceneNode>(loadedNode->name);
+            importedChild->mesh = loadedNode->mesh;
+            m_rootNode->AddChild(std::move(importedChild));
+        }
+
+        if (m_activeDisplayMesh && m_nodeGraphEditorPanel) {
+            m_nodeGraphEditorPanel->SetImportedMesh(m_activeDisplayMesh);
+        }
+        m_camera.FocusOnTarget(glm::vec3(0.0f), 4.0f);
+        LOG_INFO("Imported model into current scene: " + path);
+    } else {
+        LOG_ERROR("Failed to import model into scene: " + path);
     }
 }
 
 void EditorApp::LoadSampleModel(const std::string& name) {
     m_context->WaitIdle();
     if (name == "Box") {
-        LoadGLTFModel("assets/models/Box.gltf");
+        OpenSceneModel("assets/models/Box.gltf");
     } else {
         m_activeDisplayMesh = GLTFImporter::CreateSampleMesh(*m_context, name);
         m_rootNode = std::make_shared<SceneNode>("Scene Root");
@@ -83,13 +124,19 @@ void EditorApp::RenderMainMenuBar(ImGuiID dockspaceID) {
         ImGui::Separator();
 
         if (ImGui::BeginMenu("File")) {
-            if (ImGui::MenuItem("Open glTF 2.0 Model (File Explorer)...")) {
+            if (ImGui::MenuItem("Open Scene / 3D Model...")) {
                 std::string selectedPath = FileDialog::OpenFile();
                 if (!selectedPath.empty()) {
-                    LoadGLTFModel(selectedPath);
+                    OpenSceneModel(selectedPath);
                 }
             }
-            if (ImGui::MenuItem("Open glTF Path...")) {
+            if (ImGui::MenuItem("Import 3D Model into Current Scene...")) {
+                std::string selectedPath = FileDialog::OpenFile();
+                if (!selectedPath.empty()) {
+                    ImportModelIntoScene(selectedPath);
+                }
+            }
+            if (ImGui::MenuItem("Enter Model Path...")) {
                 m_openGltfModal = true;
             }
             if (ImGui::BeginMenu("Sample 3D Models")) {
@@ -127,6 +174,24 @@ void EditorApp::RenderMainMenuBar(ImGuiID dockspaceID) {
             ImGui::EndMenu();
         }
 
+        if (ImGui::BeginMenu("Window")) {
+            ImGui::MenuItem("Viewport", nullptr, &m_showViewport);
+            ImGui::MenuItem("Scene Hierarchy", nullptr, &m_showSceneTree);
+            ImGui::MenuItem("Node Graph Editor", nullptr, &m_showNodeGraph);
+            ImGui::MenuItem("Timeline / Animation", nullptr, &m_showTimeline);
+            ImGui::MenuItem("Asset Manager", nullptr, &m_showAssetManager);
+            ImGui::MenuItem("Vulkan Inspector", nullptr, &m_showVulkanInspector);
+            ImGui::MenuItem("Engine Log Console", nullptr, &m_showLogConsole);
+            ImGui::Separator();
+            if (ImGui::MenuItem("Show All Windows")) {
+                m_showViewport = m_showSceneTree = m_showNodeGraph = m_showTimeline = m_showAssetManager = m_showVulkanInspector = m_showLogConsole = true;
+            }
+            if (ImGui::MenuItem("Hide All Windows")) {
+                m_showViewport = m_showSceneTree = m_showNodeGraph = m_showTimeline = m_showAssetManager = m_showVulkanInspector = m_showLogConsole = false;
+            }
+            ImGui::EndMenu();
+        }
+
         if (ImGui::BeginMenu("Help")) {
             if (ImGui::MenuItem("About Khepri Engine")) {
                 ImGui::OpenPopup("About Khepri Engine Modal");
@@ -134,14 +199,14 @@ void EditorApp::RenderMainMenuBar(ImGuiID dockspaceID) {
             ImGui::EndMenu();
         }
 
-        // glTF path modal
+        // Model import path modal
         if (m_openGltfModal) {
-            ImGui::OpenPopup("Open glTF 2.0 Model");
+            ImGui::OpenPopup("Import 3D Model Path");
             m_openGltfModal = false;
         }
 
-        if (ImGui::BeginPopupModal("Open glTF 2.0 Model", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
-            ImGui::Text("Enter local filepath or browse for .gltf / .glb file:");
+        if (ImGui::BeginPopupModal("Import 3D Model Path", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+            ImGui::Text("Enter local filepath or browse for .gltf / .glb / .obj / .stl file:");
             ImGui::InputText("Path", m_gltfPathInput, sizeof(m_gltfPathInput));
             ImGui::SameLine();
             if (ImGui::Button("Browse...")) {
@@ -180,8 +245,12 @@ void EditorApp::RenderMainMenuBar(ImGuiID dockspaceID) {
     }
 }
 
-static void RenderEngineLogConsole() {
-    ImGui::Begin("Engine Log Console");
+static void RenderEngineLogConsole(bool* p_open = nullptr) {
+    if (p_open && !*p_open) return;
+    if (!ImGui::Begin("Engine Log Console", p_open)) {
+        ImGui::End();
+        return;
+    }
     if (ImGui::Button("Clear Logs")) {
         Logger::Get().ClearLogs();
     }
@@ -210,6 +279,7 @@ struct PushConstants {
     glm::mat4 mvp;
     glm::mat4 model;
     glm::vec4 baseColorFactor{1.0f, 1.0f, 1.0f, 1.0f};
+    glm::vec4 emissiveFactor{0.0f, 0.0f, 0.0f, 1.0f};
     int32_t useTexture = 0;
     float shininess = 32.0f;
     float specularStrength = 0.5f;
@@ -267,6 +337,11 @@ EditorApp::EditorApp()
     m_sceneTreePanel = std::make_unique<SceneTreePanel>(*m_context);
     m_timelinePanel = std::make_unique<TimelinePanel>();
     m_vulkanInspectorPanel = std::make_unique<VulkanInspectorPanel>(*m_context);
+
+    // Initialize AssetManager & Node Graph Engine
+    khepri::AssetManager::Instance().Initialize(*m_context);
+    m_nodeGraphEditorPanel = std::make_unique<khepri::NodeGraphEditorPanel>(*m_context);
+    m_assetManagerPanel = std::make_unique<khepri::AssetManagerPanel>();
 
     // Register Viewport Texture for ImGui rendering (initial DS creation)
     m_viewportDS = ImGui_ImplVulkan_AddTexture(
@@ -567,6 +642,7 @@ void EditorApp::DrawSceneNode(VkCommandBuffer cmd, SceneNode* node, const glm::m
         push.model = worldTransform;
         push.mvp   = m_camera.GetViewProjectionMatrix() * worldTransform;
         push.baseColorFactor = isLightGizmo ? glm::vec4(node->lightComponent->color, 1.0f) : targetMesh->GetBaseColorFactor();
+        push.emissiveFactor  = isLightGizmo ? glm::vec4(node->lightComponent->color, node->lightComponent->intensity * 2.0f) : glm::vec4(0.0f, 0.0f, 0.0f, 1.0f);
         push.useTexture = targetMesh->HasTexture() ? 1 : 0;
         push.shininess = 32.0f;
         push.specularStrength = 0.5f;
@@ -745,16 +821,41 @@ void EditorApp::Run() {
         }
 
         // Render UI panels
-        // NOTE: m_viewportDS is passed by reference — ViewportPanel::RenderUI may update it
-        // atomically (destroy old + create new) when the framebuffer is resized, guaranteeing
-        // ImGui::Image always gets a valid descriptor set.
-        m_viewportPanel->RenderUI(m_camera, m_viewportDS, deltaTime,
-                                  m_sceneTreePanel->GetSelectedNode(), m_rootNode.get());
-
-        m_sceneTreePanel->RenderUI(m_rootNode.get(), m_activeDisplayMesh);
-        m_timelinePanel->RenderUI(m_timeline, m_sceneTreePanel->GetSelectedNode(), m_rootNode.get());
-        m_vulkanInspectorPanel->RenderUI(*m_swapchain);
-        RenderEngineLogConsole();
+        if (m_showViewport && m_viewportPanel) {
+            m_viewportPanel->RenderUI(m_camera, m_viewportDS, deltaTime,
+                                      m_sceneTreePanel->GetSelectedNode(), m_rootNode.get());
+        }
+        if (m_showSceneTree && m_sceneTreePanel) {
+            m_sceneTreePanel->RenderUI(m_rootNode.get(), m_activeDisplayMesh);
+        }
+        if (m_showTimeline && m_timelinePanel) {
+            m_timelinePanel->RenderUI(m_timeline, m_sceneTreePanel->GetSelectedNode(), m_rootNode.get());
+        }
+        if (m_showVulkanInspector && m_vulkanInspectorPanel) {
+            m_vulkanInspectorPanel->RenderUI(*m_swapchain);
+        }
+        if (m_showNodeGraph && m_nodeGraphEditorPanel) {
+            m_nodeGraphEditorPanel->RenderUI(m_activeDisplayMesh);
+            
+            // Synchronize active graph output mesh to selected SceneNode (or active mesh node) for live Viewport rendering
+            SceneNode* selected = m_sceneTreePanel ? m_sceneTreePanel->GetSelectedNode() : nullptr;
+            if (selected && m_activeDisplayMesh) {
+                selected->mesh = m_activeDisplayMesh;
+            } else if (m_rootNode && m_activeDisplayMesh) {
+                for (const auto& child : m_rootNode->GetChildren()) {
+                    if (child->mesh) {
+                        child->mesh = m_activeDisplayMesh;
+                        break;
+                    }
+                }
+            }
+        }
+        if (m_showAssetManager && m_assetManagerPanel) {
+            m_assetManagerPanel->RenderUI(&m_showAssetManager);
+        }
+        if (m_showLogConsole) {
+            RenderEngineLogConsole(&m_showLogConsole);
+        }
 
         ImGui::Render();
 

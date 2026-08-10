@@ -2,11 +2,13 @@
 #include "../core/Logger.h"
 #include <glm/gtc/constants.hpp>
 
-MeshComponent::MeshComponent(VulkanContext& context, const std::vector<Vertex>& vertices, const std::vector<uint32_t>& indices)
+MeshComponent::MeshComponent(VulkanContext* context, const std::vector<Vertex>& vertices, const std::vector<uint32_t>& indices)
     : m_context(context), m_vertices(vertices), m_indices(indices) {
     
-    if (vertices.empty() || indices.empty()) {
-        LOG_WARN("MeshComponent initialized with empty vertex/index data");
+    if (!context || vertices.empty() || indices.empty()) {
+        if (vertices.empty() || indices.empty()) {
+            LOG_WARN("MeshComponent initialized with empty vertex/index data");
+        }
         return;
     }
 
@@ -14,28 +16,28 @@ MeshComponent::MeshComponent(VulkanContext& context, const std::vector<Vertex>& 
     VkDeviceSize indexSize = sizeof(uint32_t) * indices.size();
 
     // Create Staging Buffer for Vertices
-    Buffer stagingVertex(context, vertexSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VMA_MEMORY_USAGE_CPU_ONLY);
+    Buffer stagingVertex(*context, vertexSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VMA_MEMORY_USAGE_CPU_ONLY);
     stagingVertex.CopyToBuffer(vertices.data(), vertexSize);
 
-    // Create Device Local Vertex Buffer
+    // Create Device Local Vertex Buffer (Supports Storage Buffer for Compute Zero-Copy Deformers)
     m_vertexBuffer = std::make_unique<Buffer>(
-        context, vertexSize, 
-        VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, 
+        *context, vertexSize, 
+        VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, 
         VMA_MEMORY_USAGE_GPU_ONLY
     );
-    Buffer::CopyBuffer(context, stagingVertex.GetBuffer(), m_vertexBuffer->GetBuffer(), vertexSize);
+    Buffer::CopyBuffer(*context, stagingVertex.GetBuffer(), m_vertexBuffer->GetBuffer(), vertexSize);
 
     // Create Staging Buffer for Indices
-    Buffer stagingIndex(context, indexSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VMA_MEMORY_USAGE_CPU_ONLY);
+    Buffer stagingIndex(*context, indexSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VMA_MEMORY_USAGE_CPU_ONLY);
     stagingIndex.CopyToBuffer(indices.data(), indexSize);
 
     // Create Device Local Index Buffer
     m_indexBuffer = std::make_unique<Buffer>(
-        context, indexSize, 
+        *context, indexSize, 
         VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, 
         VMA_MEMORY_USAGE_GPU_ONLY
     );
-    Buffer::CopyBuffer(context, stagingIndex.GetBuffer(), m_indexBuffer->GetBuffer(), indexSize);
+    Buffer::CopyBuffer(*context, stagingIndex.GetBuffer(), m_indexBuffer->GetBuffer(), indexSize);
 }
 
 glm::vec3 MeshComponent::GetBoundingBoxCenter() const {
@@ -71,59 +73,142 @@ void MeshComponent::Draw(VkCommandBuffer cmd) const {
     vkCmdDrawIndexed(cmd, static_cast<uint32_t>(m_indices.size()), 1, 0, 0, 0);
 }
 
-std::shared_ptr<MeshComponent> MeshComponent::CreateCube(VulkanContext& context, float size) {
+std::shared_ptr<MeshComponent> MeshComponent::CreateCube(VulkanContext* context, float size, uint32_t segmentsX, uint32_t segmentsY, uint32_t segmentsZ) {
+    segmentsX = std::max(1u, segmentsX);
+    segmentsY = std::max(1u, segmentsY);
+    segmentsZ = std::max(1u, segmentsZ);
+
     float h = size * 0.5f;
-    auto makeV = [](glm::vec3 p, glm::vec3 n, glm::vec2 uv) {
-        Vertex v{};
-        v.position = p;
-        v.normal = n;
-        v.uv = uv;
-        return v;
+    std::vector<Vertex> vertices;
+    std::vector<uint32_t> indices;
+
+    auto buildPlaneFace = [&](glm::vec3 origin, glm::vec3 rightVec, glm::vec3 upVec, glm::vec3 normalVec, uint32_t segsU, uint32_t segsV) {
+        uint32_t startIdx = static_cast<uint32_t>(vertices.size());
+        for (uint32_t v = 0; v <= segsV; ++v) {
+            float tv = static_cast<float>(v) / static_cast<float>(segsV);
+            for (uint32_t u = 0; u <= segsU; ++u) {
+                float tu = static_cast<float>(u) / static_cast<float>(segsU);
+                Vertex vert{};
+                vert.position = origin + tu * rightVec + tv * upVec;
+                vert.normal = normalVec;
+                vert.uv = glm::vec2(tu, tv);
+                vert.tangent = glm::vec4(glm::normalize(rightVec), 1.0f);
+                vertices.push_back(vert);
+            }
+        }
+
+        for (uint32_t v = 0; v < segsV; ++v) {
+            for (uint32_t u = 0; u < segsU; ++u) {
+                uint32_t i0 = startIdx + v * (segsU + 1) + u;
+                uint32_t i1 = startIdx + v * (segsU + 1) + u + 1;
+                uint32_t i2 = startIdx + (v + 1) * (segsU + 1) + u + 1;
+                uint32_t i3 = startIdx + (v + 1) * (segsU + 1) + u;
+
+                indices.push_back(i0);
+                indices.push_back(i1);
+                indices.push_back(i2);
+
+                indices.push_back(i0);
+                indices.push_back(i2);
+                indices.push_back(i3);
+            }
+        }
     };
 
-    std::vector<Vertex> vertices = {
-        // Front face (+Z)
-        makeV({-h, -h,  h}, { 0.0f,  0.0f,  1.0f}, {0.0f, 0.0f}),
-        makeV({ h, -h,  h}, { 0.0f,  0.0f,  1.0f}, {1.0f, 0.0f}),
-        makeV({ h,  h,  h}, { 0.0f,  0.0f,  1.0f}, {1.0f, 1.0f}),
-        makeV({-h,  h,  h}, { 0.0f,  0.0f,  1.0f}, {0.0f, 1.0f}),
-        // Back face (-Z)
-        makeV({ h, -h, -h}, { 0.0f,  0.0f, -1.0f}, {0.0f, 0.0f}),
-        makeV({-h, -h, -h}, { 0.0f,  0.0f, -1.0f}, {1.0f, 0.0f}),
-        makeV({-h,  h, -h}, { 0.0f,  0.0f, -1.0f}, {1.0f, 1.0f}),
-        makeV({ h,  h, -h}, { 0.0f,  0.0f, -1.0f}, {0.0f, 1.0f}),
-        // Top face (+Y)
-        makeV({-h,  h,  h}, { 0.0f,  1.0f,  0.0f}, {0.0f, 0.0f}),
-        makeV({ h,  h,  h}, { 0.0f,  1.0f,  0.0f}, {1.0f, 0.0f}),
-        makeV({ h,  h, -h}, { 0.0f,  1.0f,  0.0f}, {1.0f, 1.0f}),
-        makeV({-h,  h, -h}, { 0.0f,  1.0f,  0.0f}, {0.0f, 1.0f}),
-        // Bottom face (-Y)
-        makeV({-h, -h, -h}, { 0.0f, -1.0f,  0.0f}, {0.0f, 0.0f}),
-        makeV({ h, -h, -h}, { 0.0f, -1.0f,  0.0f}, {1.0f, 0.0f}),
-        makeV({ h, -h,  h}, { 0.0f, -1.0f,  0.0f}, {1.0f, 1.0f}),
-        makeV({-h, -h,  h}, { 0.0f, -1.0f,  0.0f}, {0.0f, 1.0f}),
-        // Right face (+X)
-        makeV({ h, -h,  h}, { 1.0f,  0.0f,  0.0f}, {0.0f, 0.0f}),
-        makeV({ h, -h, -h}, { 1.0f,  0.0f,  0.0f}, {1.0f, 0.0f}),
-        makeV({ h,  h, -h}, { 1.0f,  0.0f,  0.0f}, {1.0f, 1.0f}),
-        makeV({ h,  h,  h}, { 1.0f,  0.0f,  0.0f}, {0.0f, 1.0f}),
-        // Left face (-X)
-        makeV({-h, -h, -h}, {-1.0f,  0.0f,  0.0f}, {0.0f, 0.0f}),
-        makeV({-h, -h,  h}, {-1.0f,  0.0f,  0.0f}, {1.0f, 0.0f}),
-        makeV({-h,  h,  h}, {-1.0f,  0.0f,  0.0f}, {1.0f, 1.0f}),
-        makeV({-h,  h, -h}, {-1.0f,  0.0f,  0.0f}, {0.0f, 1.0f})
-    };
-
-    std::vector<uint32_t> indices = {
-         0, 1, 2,  2, 3, 0,
-         4, 5, 6,  6, 7, 4,
-         8, 9,10, 10,11, 8,
-        12,13,14, 14,15,12,
-        16,17,18, 18,19,16,
-        20,21,22, 22,23,20
-    };
+    // Front (+Z)
+    buildPlaneFace({-h, -h,  h}, { 2.0f * h, 0.0f, 0.0f}, {0.0f, 2.0f * h, 0.0f}, { 0.0f,  0.0f,  1.0f}, segmentsX, segmentsY);
+    // Back (-Z)
+    buildPlaneFace({ h, -h, -h}, {-2.0f * h, 0.0f, 0.0f}, {0.0f, 2.0f * h, 0.0f}, { 0.0f,  0.0f, -1.0f}, segmentsX, segmentsY);
+    // Top (+Y)
+    buildPlaneFace({-h,  h,  h}, { 2.0f * h, 0.0f, 0.0f}, {0.0f, 0.0f, -2.0f * h}, { 0.0f,  1.0f,  0.0f}, segmentsX, segmentsZ);
+    // Bottom (-Y)
+    buildPlaneFace({-h, -h, -h}, { 2.0f * h, 0.0f, 0.0f}, {0.0f, 0.0f,  2.0f * h}, { 0.0f, -1.0f,  0.0f}, segmentsX, segmentsZ);
+    // Right (+X)
+    buildPlaneFace({ h, -h,  h}, {0.0f, 0.0f, -2.0f * h}, {0.0f, 2.0f * h, 0.0f}, { 1.0f,  0.0f,  0.0f}, segmentsZ, segmentsY);
+    // Left (-X)
+    buildPlaneFace({-h, -h, -h}, {0.0f, 0.0f,  2.0f * h}, {0.0f, 2.0f * h, 0.0f}, {-1.0f,  0.0f,  0.0f}, segmentsZ, segmentsY);
 
     return std::make_shared<MeshComponent>(context, vertices, indices);
+}
+
+std::shared_ptr<MeshComponent> MeshComponent::SubdivideMesh(VulkanContext* context, const MeshComponent& inputMesh, uint32_t levels) {
+    if (levels == 0) {
+        auto res = std::make_shared<MeshComponent>(context, inputMesh.GetVertices(), inputMesh.GetIndices());
+        res->SetTexture(inputMesh.GetTexture());
+        res->SetBaseColorFactor(inputMesh.GetBaseColorFactor());
+        return res;
+    }
+
+    // Safety guard against exponential explosion on dense meshes (>20,000 tris)
+    uint32_t inputTris = static_cast<uint32_t>(inputMesh.GetIndices().size() / 3);
+    if (inputTris > 20000) {
+        levels = 0;
+        auto res = std::make_shared<MeshComponent>(context, inputMesh.GetVertices(), inputMesh.GetIndices());
+        res->SetTexture(inputMesh.GetTexture());
+        res->SetBaseColorFactor(inputMesh.GetBaseColorFactor());
+        return res;
+    } else if (inputTris > 2000) {
+        levels = std::min(levels, 1u);
+    } else {
+        levels = std::min(levels, 3u);
+    }
+
+    std::vector<Vertex> currentVerts = inputMesh.GetVertices();
+    std::vector<uint32_t> currentIndices = inputMesh.GetIndices();
+
+    for (uint32_t lvl = 0; lvl < levels; ++lvl) {
+        std::vector<Vertex> nextVerts = currentVerts;
+        std::vector<uint32_t> nextIndices;
+        nextIndices.reserve(currentIndices.size() * 4);
+
+        std::unordered_map<uint64_t, uint32_t> midpointCache;
+
+        auto getMidpoint = [&](uint32_t i0, uint32_t i1) -> uint32_t {
+            uint64_t key = (static_cast<uint64_t>(std::min(i0, i1)) << 32) | std::max(i0, i1);
+            auto it = midpointCache.find(key);
+            if (it != midpointCache.end()) return it->second;
+
+            const Vertex& v0 = currentVerts[i0];
+            const Vertex& v1 = currentVerts[i1];
+
+            Vertex mid{};
+            mid.position = 0.5f * (v0.position + v1.position);
+            glm::vec3 n = 0.5f * (v0.normal + v1.normal);
+            mid.normal = (glm::length(n) > 1e-5f) ? glm::normalize(n) : v0.normal;
+            mid.tangent = 0.5f * (v0.tangent + v1.tangent);
+            mid.uv = 0.5f * (v0.uv + v1.uv);
+            mid.jointIndices = v0.jointIndices;
+            mid.jointWeights = 0.5f * (v0.jointWeights + v1.jointWeights);
+
+            uint32_t newIdx = static_cast<uint32_t>(nextVerts.size());
+            nextVerts.push_back(mid);
+            midpointCache[key] = newIdx;
+            return newIdx;
+        };
+
+        for (size_t i = 0; i < currentIndices.size(); i += 3) {
+            uint32_t idx0 = currentIndices[i];
+            uint32_t idx1 = currentIndices[i + 1];
+            uint32_t idx2 = currentIndices[i + 2];
+
+            uint32_t m01 = getMidpoint(idx0, idx1);
+            uint32_t m12 = getMidpoint(idx1, idx2);
+            uint32_t m20 = getMidpoint(idx2, idx0);
+
+            nextIndices.push_back(idx0); nextIndices.push_back(m01); nextIndices.push_back(m20);
+            nextIndices.push_back(m01);  nextIndices.push_back(idx1); nextIndices.push_back(m12);
+            nextIndices.push_back(m20);  nextIndices.push_back(m12);  nextIndices.push_back(idx2);
+            nextIndices.push_back(m01);  nextIndices.push_back(m12);  nextIndices.push_back(m20);
+        }
+
+        currentVerts = std::move(nextVerts);
+        currentIndices = std::move(nextIndices);
+    }
+
+    auto result = std::make_shared<MeshComponent>(context, currentVerts, currentIndices);
+    result->SetTexture(inputMesh.GetTexture());
+    result->SetBaseColorFactor(inputMesh.GetBaseColorFactor());
+    return result;
 }
 
 std::shared_ptr<MeshComponent> MeshComponent::CreateSphere(VulkanContext& context, float radius, uint32_t sectors, uint32_t stacks) {

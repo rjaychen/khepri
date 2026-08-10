@@ -1,0 +1,36 @@
+#version 450
+
+layout(local_size_x = 256, local_size_y = 1, local_size_z = 1) in;
+
+struct Vertex {
+    vec3 position;
+    vec3 normal;
+    vec2 uv;
+};
+
+layout(std430, binding = 0) buffer VertexBuffer {
+    Vertex vertices[];
+};
+
+layout(push_constant) uniform PushConstants {
+    float amplitude;  // Wave height amplitude
+    float frequency;  // Wave spatial frequency
+    float time;       // Animation time step
+    uint vertexCount; // Total vertices in buffer
+} pc;
+
+void main() {
+    uint idx = gl_GlobalInvocationID.x;
+    if (idx >= pc.vertexCount) return;
+
+    vec3 pos = vertices[idx].position;
+
+    // Apply sine wave along Y axis based on X and Z distance
+    float dist = length(pos.xz);
+    float wave = sin(dist * pc.frequency + pc.time) * pc.amplitude;
+    vertices[idx].position.y += wave;
+
+    // Approximate updated normal vector
+    float deriv = cos(dist * pc.frequency + pc.time) * pc.amplitude * pc.frequency;
+    vertices[idx].normal = normalize(vec3(-deriv, 1.0, -deriv));
+}

@@ -1,13 +1,23 @@
 #define CGLTF_IMPLEMENTATION
 #include "cgltf.h"
-
 #include "GLTFImporter.h"
 #include "../core/Logger.h"
 #include <iostream>
+#include <fstream>
+#include <sstream>
+#include <algorithm>
 
-std::shared_ptr<SceneNode> GLTFImporter::LoadFromFile(VulkanContext& context, const std::string& filepath,
-                                               VkDescriptorSetLayout setLayout, DescriptorAllocator* allocator, VkBuffer lightUBOBuffer) {
-    LOG_INFO("Loading glTF model from: " + filepath);
+bool GLTFImporter::CanImport(const std::string& filepath) const {
+    size_t dotPos = filepath.find_last_of('.');
+    if (dotPos == std::string::npos) return false;
+    std::string ext = filepath.substr(dotPos);
+    for (char& c : ext) c = static_cast<char>(tolower(c));
+    return ext == ".gltf" || ext == ".glb";
+}
+
+std::shared_ptr<SceneNode> GLTFImporter::Import(VulkanContext& context, const std::string& filepath,
+                                                 VkDescriptorSetLayout setLayout, DescriptorAllocator* allocator, VkBuffer lightUBOBuffer) {
+    LOG_INFO("Loading glTF model via GLTFImporter: " + filepath);
 
     cgltf_options options = {};
     cgltf_data* data = NULL;
@@ -127,16 +137,4 @@ std::shared_ptr<SceneNode> GLTFImporter::LoadFromFile(VulkanContext& context, co
 
     LOG_INFO("Successfully imported glTF model: " + std::to_string(meshCount) + " primitive mesh nodes loaded.");
     return rootNode;
-}
-
-std::shared_ptr<MeshComponent> GLTFImporter::CreateSampleMesh(VulkanContext& context, const std::string& primitiveName) {
-    if (primitiveName == "Sphere") {
-        return MeshComponent::CreateSphere(context, 1.2f, 32, 16);
-    } else if (primitiveName == "Cylinder") {
-        return MeshComponent::CreateCylinder(context, 0.8f, 2.0f, 32);
-    } else if (primitiveName == "Plane") {
-        return MeshComponent::CreatePlane(context, 5.0f, 10);
-    }
-    // Default to Cube
-    return MeshComponent::CreateCube(context, 2.0f);
 }

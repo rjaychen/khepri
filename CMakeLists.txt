@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.20)
 set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
-project(KhepriEngine VERSION 0.1.2 LANGUAGES C CXX)
+project(KhepriEngine VERSION 0.1.3 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -86,10 +86,12 @@ file(GLOB_RECURSE ENGINE_SOURCES
     "src/*.hpp"
 )
 
-# Explicitly list GLTFImporter to prevent CMake globbing cache issues
+# Explicitly list files to prevent CMake globbing cache issues
 list(APPEND ENGINE_SOURCES
     "${CMAKE_CURRENT_SOURCE_DIR}/src/mesh/GLTFImporter.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/mesh/GLTFImporter.h"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/editor/AssetManagerPanel.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/editor/AssetManagerPanel.h"
 )
 list(REMOVE_DUPLICATES ENGINE_SOURCES)
 
@@ -143,6 +145,8 @@ if(GLSLC)
     set(SHADER_SOURCES
         ${SHADER_SOURCE_DIR}/mesh.vert
         ${SHADER_SOURCE_DIR}/mesh.frag
+        ${SHADER_SOURCE_DIR}/deform_twist.comp
+        ${SHADER_SOURCE_DIR}/deform_wave.comp
     )
 
     foreach(SHADER ${SHADER_SOURCES})
@@ -188,10 +192,20 @@ if(BUILD_TESTS)
     add_executable(KhepriEngineTests
         tests/MainTests.cpp
         tests/HalfEdgeTests.cpp
+        tests/NodeGraphTests.cpp
+        tests/ModelImporterTests.cpp
+        src/graph/NodeGraph.cpp
+        src/graph/GeometryNodes.cpp
+        src/material/Material.cpp
+        src/assets/AssetManager.cpp
         src/mesh/HalfEdgeMesh.cpp
         src/mesh/CDT.cpp
         src/mesh/ExactPredicates.cpp
         src/mesh/MeshBoolean.cpp
+        src/mesh/ModelImporter.cpp
+        src/mesh/OBJImporter.cpp
+        src/mesh/STLImporter.cpp
+        src/mesh/GLTFImporter.cpp
         src/scene/SceneNode.cpp
         src/scene/MeshComponent.cpp
         src/scene/Camera.cpp

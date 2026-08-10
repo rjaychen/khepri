@@ -1,0 +1,45 @@
+#version 450
+
+layout(local_size_x = 256, local_size_y = 1, local_size_z = 1) in;
+
+struct Vertex {
+    vec3 position;
+    vec3 normal;
+    vec2 uv;
+};
+
+layout(std430, binding = 0) buffer VertexBuffer {
+    Vertex vertices[];
+};
+
+layout(push_constant) uniform PushConstants {
+    float angle;      // Twist angle in radians
+    float heightMin;  // Minimum Y bound
+    float heightMax;  // Maximum Y bound
+    uint vertexCount; // Total vertices in buffer
+} pc;
+
+void main() {
+    uint idx = gl_GlobalInvocationID.x;
+    if (idx >= pc.vertexCount) return;
+
+    vec3 pos = vertices[idx].position;
+    vec3 norm = vertices[idx].normal;
+
+    float heightRange = max(pc.heightMax - pc.heightMin, 0.0001);
+    float factor = clamp((pos.y - pc.heightMin) / heightRange, 0.0, 1.0);
+    float rad = pc.angle * factor;
+
+    float cosA = cos(rad);
+    float sinA = sin(rad);
+
+    // Rotate position around Y axis
+    float xNew = pos.x * cosA - pos.z * sinA;
+    float zNew = pos.x * sinA + pos.z * cosA;
+    vertices[idx].position = vec3(xNew, pos.y, zNew);
+
+    // Rotate normal around Y axis
+    float nxNew = norm.x * cosA - norm.z * sinA;
+    float nzNew = norm.x * sinA + norm.z * cosA;
+    vertices[idx].normal = normalize(vec3(nxNew, norm.y, nzNew));
+}

@@ -17,6 +17,8 @@
 #include "SceneTreePanel.h"
 #include "TimelinePanel.h"
 #include "VulkanInspectorPanel.h"
+#include "NodeGraphEditorPanel.h"
+#include "AssetManagerPanel.h"
 
 #include <imgui.h>
 #include <imgui_impl_glfw.h>
@@ -38,7 +40,9 @@ public:
     void SetEditorMode(EditorMode mode);
     EditorMode GetEditorMode() const { return m_currentMode; }
 
-    void LoadGLTFModel(const std::string& path);
+    void OpenSceneModel(const std::string& path);
+    void ImportModelIntoScene(const std::string& path);
+    void LoadGLTFModel(const std::string& path) { OpenSceneModel(path); }
     void LoadSampleModel(const std::string& name);
 
 private:
@@ -88,6 +92,17 @@ private:
     std::unique_ptr<SceneTreePanel> m_sceneTreePanel;
     std::unique_ptr<TimelinePanel> m_timelinePanel;
     std::unique_ptr<VulkanInspectorPanel> m_vulkanInspectorPanel;
+    std::unique_ptr<khepri::NodeGraphEditorPanel> m_nodeGraphEditorPanel;
+    std::unique_ptr<khepri::AssetManagerPanel> m_assetManagerPanel;
+
+    // Window Visibility Toggles
+    bool m_showViewport = true;
+    bool m_showSceneTree = true;
+    bool m_showNodeGraph = true;
+    bool m_showTimeline = true;
+    bool m_showAssetManager = true; // Open on load-in by default
+    bool m_showVulkanInspector = false; // Untoggled by default
+    bool m_showLogConsole = true;
 
     EditorMode m_currentMode = EditorMode::MeshEditing;
     bool m_rebuildLayout = true;

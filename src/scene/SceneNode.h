@@ -41,6 +41,8 @@ public:
     
     SceneNode* AddChild(std::unique_ptr<SceneNode> child);
     void RemoveChild(SceneNode* child);
+    std::unique_ptr<SceneNode> DetachChild(SceneNode* child);
+    bool IsDescendantOf(const SceneNode* possibleAncestor) const;
 
     // Reflected Properties implementation
     std::vector<Property>& GetProperties() override { return m_properties; }

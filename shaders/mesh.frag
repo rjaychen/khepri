@@ -18,6 +18,7 @@ layout(push_constant) uniform PushConstants {
     mat4 mvp;
     mat4 model;
     vec4 baseColorFactor;
+    vec4 emissiveFactor;
     int useTexture;
     float shininess;
     float specularStrength;
@@ -88,6 +89,9 @@ void main() {
     // Ambient Lighting
     vec3 ambient = pc.ambientStrength * albedo;
 
+    // Self-Illumination / Emission (RGB color * scalar intensity in pc.emissiveFactor.w)
+    vec3 emission = pc.emissiveFactor.rgb * pc.emissiveFactor.w;
+
     // Accumulate Light Contributions
     vec3 totalLighting = ambient;
     int numLights = int(clamp(ubo.cameraPos.w, 0.0, 16.0));
@@ -103,5 +107,5 @@ void main() {
         }
     }
 
-    outColor = vec4(totalLighting, alpha);
+    outColor = vec4(totalLighting + emission, alpha);
 }

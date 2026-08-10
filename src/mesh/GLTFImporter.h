@@ -1,22 +1,27 @@
 #pragma once
 
-#include <string>
-#include <memory>
-#include <vector>
-#include "../scene/MeshComponent.h"
-#include "../scene/SceneNode.h"
-#include "../vulkan/VulkanContext.h"
+#include "ModelImporter.h"
 
-#include "../vulkan/Descriptors.h"
-
-class GLTFImporter {
+class GLTFImporter : public ModelImporter {
 public:
-    // Loads a glTF (.gltf or .glb) file into a SceneNode containing MeshComponent primitives
+    GLTFImporter() = default;
+    ~GLTFImporter() override = default;
+
+    [[nodiscard]] bool CanImport(const std::string& filepath) const override;
+    [[nodiscard]] std::shared_ptr<SceneNode> Import(VulkanContext& context, const std::string& filepath,
+                                                            VkDescriptorSetLayout setLayout = VK_NULL_HANDLE,
+                                                            DescriptorAllocator* allocator = nullptr,
+                                                            VkBuffer lightUBOBuffer = VK_NULL_HANDLE) override;
+
+    // Static facade methods maintained for backward compatibility
     static std::shared_ptr<SceneNode> LoadFromFile(VulkanContext& context, const std::string& filepath,
                                                    VkDescriptorSetLayout setLayout = VK_NULL_HANDLE,
                                                    DescriptorAllocator* allocator = nullptr,
-                                                   VkBuffer lightUBOBuffer = VK_NULL_HANDLE);
+                                                   VkBuffer lightUBOBuffer = VK_NULL_HANDLE) {
+        return ModelImporter::LoadFromFile(context, filepath, setLayout, allocator, lightUBOBuffer);
+    }
 
-    // Creates sample primitive meshes for instant loading
-    static std::shared_ptr<MeshComponent> CreateSampleMesh(VulkanContext& context, const std::string& primitiveName);
+    static std::shared_ptr<MeshComponent> CreateSampleMesh(VulkanContext& context, const std::string& primitiveName) {
+        return ModelImporter::CreateSampleMesh(context, primitiveName);
+    }
 };

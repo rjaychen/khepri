@@ -64,15 +64,17 @@ struct Vertex {
 
 class MeshComponent {
 public:
-    MeshComponent(VulkanContext& context, const std::vector<Vertex>& vertices, const std::vector<uint32_t>& indices);
+    MeshComponent(VulkanContext* context, const std::vector<Vertex>& vertices, const std::vector<uint32_t>& indices);
+    MeshComponent(VulkanContext& context, const std::vector<Vertex>& vertices, const std::vector<uint32_t>& indices)
+        : MeshComponent(&context, vertices, indices) {}
     ~MeshComponent() = default;
 
     const std::vector<Vertex>& GetVertices() const { return m_vertices; }
     const std::vector<uint32_t>& GetIndices() const { return m_indices; }
     uint32_t GetIndexCount() const { return static_cast<uint32_t>(m_indices.size()); }
 
-    VkBuffer GetVertexBuffer() const { return m_vertexBuffer->GetBuffer(); }
-    VkBuffer GetIndexBuffer() const { return m_indexBuffer->GetBuffer(); }
+    VkBuffer GetVertexBuffer() const { return m_vertexBuffer ? m_vertexBuffer->GetBuffer() : VK_NULL_HANDLE; }
+    VkBuffer GetIndexBuffer() const { return m_indexBuffer ? m_indexBuffer->GetBuffer() : VK_NULL_HANDLE; }
 
     void SetTexture(std::shared_ptr<Texture> texture) { m_texture = texture; }
     std::shared_ptr<Texture> GetTexture() const { return m_texture; }
@@ -86,13 +88,22 @@ public:
     void Draw(VkCommandBuffer cmd) const;
 
     // Standard Primitive Factory Generators
-    static std::shared_ptr<MeshComponent> CreateCube(VulkanContext& context, float size = 1.0f);
+    static std::shared_ptr<MeshComponent> CreateCube(VulkanContext* context, float size = 1.0f, uint32_t segmentsX = 10, uint32_t segmentsY = 10, uint32_t segmentsZ = 10);
+    static std::shared_ptr<MeshComponent> CreateCube(VulkanContext& context, float size = 1.0f, uint32_t segmentsX = 10, uint32_t segmentsY = 10, uint32_t segmentsZ = 10) {
+        return CreateCube(&context, size, segmentsX, segmentsY, segmentsZ);
+    }
     static std::shared_ptr<MeshComponent> CreateSphere(VulkanContext& context, float radius = 0.5f, uint32_t sectors = 32, uint32_t stacks = 16);
     static std::shared_ptr<MeshComponent> CreatePlane(VulkanContext& context, float size = 10.0f, uint32_t gridSubdivisions = 10);
     static std::shared_ptr<MeshComponent> CreateCylinder(VulkanContext& context, float radius = 0.5f, float height = 1.0f, uint32_t sectors = 32);
 
+    // Topological Mesh Operators
+    static std::shared_ptr<MeshComponent> SubdivideMesh(VulkanContext* context, const MeshComponent& inputMesh, uint32_t levels = 1);
+    static std::shared_ptr<MeshComponent> SubdivideMesh(VulkanContext& context, const MeshComponent& inputMesh, uint32_t levels = 1) {
+        return SubdivideMesh(&context, inputMesh, levels);
+    }
+
 private:
-    VulkanContext& m_context;
+    VulkanContext* m_context = nullptr;
     std::vector<Vertex> m_vertices;
     std::vector<uint32_t> m_indices;
 

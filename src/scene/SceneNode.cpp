@@ -59,6 +59,28 @@ void SceneNode::RemoveChild(SceneNode* child) {
     m_children.erase(it, m_children.end());
 }
 
+std::unique_ptr<SceneNode> SceneNode::DetachChild(SceneNode* child) {
+    auto it = std::find_if(m_children.begin(), m_children.end(),
+        [child](const std::unique_ptr<SceneNode>& ptr) { return ptr.get() == child; });
+    if (it != m_children.end()) {
+        std::unique_ptr<SceneNode> detached = std::move(*it);
+        m_children.erase(it);
+        detached->m_parent = nullptr;
+        return detached;
+    }
+    return nullptr;
+}
+
+bool SceneNode::IsDescendantOf(const SceneNode* possibleAncestor) const {
+    if (!possibleAncestor) return false;
+    const SceneNode* curr = m_parent;
+    while (curr) {
+        if (curr == possibleAncestor) return true;
+        curr = curr->m_parent;
+    }
+    return false;
+}
+
 void SceneNode::SyncPropertiesToTransform() {
     if (m_properties.size() >= 3) {
         m_properties[0].value = position;
