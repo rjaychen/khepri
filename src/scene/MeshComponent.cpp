@@ -211,7 +211,7 @@ std::shared_ptr<MeshComponent> MeshComponent::SubdivideMesh(VulkanContext* conte
     return result;
 }
 
-std::shared_ptr<MeshComponent> MeshComponent::CreateSphere(VulkanContext& context, float radius, uint32_t sectors, uint32_t stacks) {
+std::shared_ptr<MeshComponent> MeshComponent::CreateSphere(VulkanContext* context, float radius, uint32_t sectors, uint32_t stacks) {
     std::vector<Vertex> vertices;
     std::vector<uint32_t> indices;
 
@@ -260,7 +260,7 @@ std::shared_ptr<MeshComponent> MeshComponent::CreateSphere(VulkanContext& contex
     return std::make_shared<MeshComponent>(context, vertices, indices);
 }
 
-std::shared_ptr<MeshComponent> MeshComponent::CreatePlane(VulkanContext& context, float size, uint32_t subdivisions) {
+std::shared_ptr<MeshComponent> MeshComponent::CreatePlane(VulkanContext* context, float size, uint32_t subdivisions) {
     std::vector<Vertex> vertices;
     std::vector<uint32_t> indices;
 
@@ -295,7 +295,7 @@ std::shared_ptr<MeshComponent> MeshComponent::CreatePlane(VulkanContext& context
     return std::make_shared<MeshComponent>(context, vertices, indices);
 }
 
-std::shared_ptr<MeshComponent> MeshComponent::CreateCylinder(VulkanContext& context, float radius, float height, uint32_t sectors) {
+std::shared_ptr<MeshComponent> MeshComponent::CreateCylinder(VulkanContext* context, float radius, float height, uint32_t sectors) {
     std::vector<Vertex> vertices;
     std::vector<uint32_t> indices;
 

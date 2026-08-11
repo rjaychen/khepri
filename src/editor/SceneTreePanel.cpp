@@ -5,7 +5,11 @@
 SceneTreePanel::SceneTreePanel(VulkanContext& context)
     : m_context(context) {}
 
-void SceneTreePanel::RenderUI(SceneNode* rootNode, std::shared_ptr<MeshComponent>& activeMesh) {
+#include "../assets/AssetManager.h"
+#include <fstream>
+
+void SceneTreePanel::RenderUI(SceneNode* rootNode, std::shared_ptr<MeshComponent>& activeMesh,
+                              const std::filesystem::path& selectedAssetPath) {
     ImGui::Begin("Scene Hierarchy");
 
     // --- Add Dropdown Section ---
@@ -101,6 +105,12 @@ void SceneTreePanel::RenderUI(SceneNode* rootNode, std::shared_ptr<MeshComponent
                 }
             }
         }
+        if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("ASSET_PATH_PAYLOAD")) {
+            const char* pathStr = static_cast<const char*>(payload->Data);
+            if (m_onImportModel) {
+                m_onImportModel(pathStr);
+            }
+        }
         ImGui::EndDragDropTarget();
     }
 
@@ -109,12 +119,96 @@ void SceneTreePanel::RenderUI(SceneNode* rootNode, std::shared_ptr<MeshComponent
     // --- Inspector Panel ---
     ImGui::Begin("Inspector");
     if (m_selectedNode) {
-        RenderInspector(m_selectedNode);
+        RenderInspector(m_selectedNode, selectedAssetPath);
+    } else if (!selectedAssetPath.empty()) {
+        RenderFileAssetInspector(selectedAssetPath);
     } else {
-        ImGui::TextDisabled("No Node Selected");
+        ImGui::TextDisabled("No Node or Asset File Selected");
     }
     ImGui::End();
 }
+
+void SceneTreePanel::RenderFileAssetInspector(const std::filesystem::path& assetPath) {
+    if (!std::filesystem::exists(assetPath)) {
+        ImGui::TextDisabled("Selected file no longer exists.");
+        return;
+    }
+
+    std::string filename = assetPath.filename().string();
+    std::string ext = assetPath.extension().string();
+    std::transform(ext.begin(), ext.end(), ext.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+
+    ImGui::TextColored(ImVec4(0.3f, 0.8f, 1.0f, 1.0f), "Asset File Inspector");
+    ImGui::Separator();
+
+    ImGui::Text("File Name: %s", filename.c_str());
+    ImGui::Text("Path: %s", assetPath.string().c_str());
+
+    uintmax_t sizeBytes = 0;
+    try {
+        sizeBytes = std::filesystem::file_size(assetPath);
+    } catch (...) {}
+
+    if (sizeBytes < 1024) {
+        ImGui::Text("Size: %zu Bytes", sizeBytes);
+    } else if (sizeBytes < 1024 * 1024) {
+        ImGui::Text("Size: %.2f KB", sizeBytes / 1024.0f);
+    } else {
+        ImGui::Text("Size: %.2f MB", sizeBytes / (1024.0f * 1024.0f));
+    }
+
+    // Default asset check
+    std::string lowerPath = assetPath.string();
+    std::transform(lowerPath.begin(), lowerPath.end(), lowerPath.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    if (lowerPath.find("bunny") != std::string::npos || lowerPath.find("duck") != std::string::npos ||
+        lowerPath.find("teapot") != std::string::npos || lowerPath.find("box.gltf") != std::string::npos) {
+        ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.2f, 1.0f), "🌟 Default Engine Asset Model");
+    }
+
+    ImGui::Separator();
+
+    bool isModel = (ext == ".gltf" || ext == ".glb" || ext == ".obj" || ext == ".stl");
+    if (isModel) {
+        ImGui::TextColored(ImVec4(0.4f, 0.9f, 0.4f, 1.0f), "3D Geometry Model Asset");
+        ImGui::Spacing();
+        
+        if (ImGui::Button("Open Scene with Model (Replace Current)", ImVec2(-1, 30))) {
+            if (m_onOpenModel) m_onOpenModel(assetPath.string());
+        }
+        if (ImGui::Button("Import Model into Current Scene", ImVec2(-1, 30))) {
+            if (m_onImportModel) m_onImportModel(assetPath.string());
+        }
+    } else if (ext == ".mat") {
+        ImGui::TextColored(ImVec4(0.9f, 0.6f, 0.2f, 1.0f), "Material Preset Asset");
+        std::string matName = assetPath.stem().string();
+        auto mat = khepri::AssetManager::Instance().GetMaterial(matName);
+        if (mat) {
+            glm::vec4 color = mat->GetBaseColorFactor();
+            if (ImGui::ColorEdit4("Base Color Factor", glm::value_ptr(color))) {
+                mat->SetBaseColorFactor(color);
+            }
+            float roughness = mat->GetRoughness();
+            if (ImGui::DragFloat("Roughness", &roughness, 0.01f, 0.0f, 1.0f)) {
+                mat->SetRoughness(roughness);
+            }
+            float metallic = mat->GetMetallic();
+            if (ImGui::DragFloat("Metallic", &metallic, 0.01f, 0.0f, 1.0f)) {
+                mat->SetMetallic(metallic);
+            }
+        }
+    } else if (ext == ".txt" || ext == ".json") {
+        ImGui::TextColored(ImVec4(0.8f, 0.8f, 0.8f, 1.0f), "Text Document Asset");
+        ImGui::Separator();
+        std::ifstream file(assetPath);
+        if (file.is_open()) {
+            std::string content((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+            file.close();
+            if (content.size() > 1000) content = content.substr(0, 1000) + "... (truncated)";
+            ImGui::TextWrapped("%s", content.c_str());
+        }
+    }
+}
+
 
 void SceneTreePanel::RenderNodeTree(SceneNode* node) {
     if (!node) return;
@@ -223,7 +317,8 @@ void SceneTreePanel::RenderNodeTree(SceneNode* node) {
     ImGui::PopID();
 }
 
-void SceneTreePanel::RenderInspector(SceneNode* node) {
+void SceneTreePanel::RenderInspector(SceneNode* node, const std::filesystem::path& selectedAssetPath) {
+    (void)selectedAssetPath;
     char nameBuf[256];
     strncpy(nameBuf, node->name.c_str(), sizeof(nameBuf));
     nameBuf[sizeof(nameBuf) - 1] = '\0';
@@ -304,6 +399,13 @@ void SceneTreePanel::RenderInspector(SceneNode* node) {
         ImGui::BulletText("Vertices: %zu",   node->mesh->GetVertices().size());
         ImGui::BulletText("Triangles: %zu",  node->mesh->GetIndices().size() / 3);
         ImGui::BulletText("Has Texture: %s", node->mesh->HasTexture() ? "Yes (Loaded)" : "No (Default White)");
+
+        const char* wireframeOptions[] = { "Solid", "Wireframe Overlay", "Wireframe Only" };
+        int currentWire = static_cast<int>(node->wireframeMode);
+        if (ImGui::Combo("Wireframe Display", &currentWire, wireframeOptions, IM_ARRAYSIZE(wireframeOptions))) {
+            node->wireframeMode = static_cast<WireframeMode>(currentWire);
+        }
+
         glm::vec4 colorFactor = node->mesh->GetBaseColorFactor();
         if (ImGui::ColorEdit4("Base Color Factor", glm::value_ptr(colorFactor))) {
             node->mesh->SetBaseColorFactor(colorFactor);

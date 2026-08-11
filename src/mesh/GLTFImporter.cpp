@@ -6,6 +6,7 @@
 #include <fstream>
 #include <sstream>
 #include <algorithm>
+#include <filesystem>
 
 bool GLTFImporter::CanImport(const std::string& filepath) const {
     size_t dotPos = filepath.find_last_of('.');
@@ -19,16 +20,31 @@ std::shared_ptr<SceneNode> GLTFImporter::Import(VulkanContext& context, const st
                                                  VkDescriptorSetLayout setLayout, DescriptorAllocator* allocator, VkBuffer lightUBOBuffer) {
     LOG_INFO("Loading glTF model via GLTFImporter: " + filepath);
 
+    std::string resolvedPath = filepath;
+    if (!std::filesystem::exists(resolvedPath)) {
+        std::vector<std::string> candidates = {
+            "../" + filepath,
+            "../../" + filepath,
+            "../../../" + filepath
+        };
+        for (const auto& candidate : candidates) {
+            if (std::filesystem::exists(candidate)) {
+                resolvedPath = candidate;
+                break;
+            }
+        }
+    }
+
     cgltf_options options = {};
     cgltf_data* data = NULL;
-    cgltf_result result = cgltf_parse_file(&options, filepath.c_str(), &data);
+    cgltf_result result = cgltf_parse_file(&options, resolvedPath.c_str(), &data);
 
     if (result != cgltf_result_success) {
-        LOG_ERROR("Failed to parse glTF file: " + filepath + " (Error code: " + std::to_string(result) + ")");
+        LOG_ERROR("Failed to parse glTF file: " + resolvedPath + " (Error code: " + std::to_string(result) + ")");
         return nullptr;
     }
 
-    result = cgltf_load_buffers(&options, data, filepath.c_str());
+    result = cgltf_load_buffers(&options, data, resolvedPath.c_str());
     if (result != cgltf_result_success) {
         LOG_ERROR("Failed to load glTF buffers for: " + filepath
                   + " (cgltf error: " + std::to_string(static_cast<int>(result)) + ")");

@@ -4,6 +4,7 @@
 #include <sstream>
 #include <algorithm>
 #include <unordered_map>
+#include <filesystem>
 
 bool OBJImporter::CanImport(const std::string& filepath) const {
     size_t dotPos = filepath.find_last_of('.');
@@ -16,9 +17,25 @@ bool OBJImporter::CanImport(const std::string& filepath) const {
 std::shared_ptr<SceneNode> OBJImporter::Import(VulkanContext& context, const std::string& filepath,
                                                 VkDescriptorSetLayout, DescriptorAllocator*, VkBuffer) {
     LOG_INFO("Loading Wavefront OBJ model via OBJImporter: " + filepath);
-    std::ifstream file(filepath);
+
+    std::string resolvedPath = filepath;
+    if (!std::filesystem::exists(resolvedPath)) {
+        std::vector<std::string> candidates = {
+            "../" + filepath,
+            "../../" + filepath,
+            "../../../" + filepath
+        };
+        for (const auto& candidate : candidates) {
+            if (std::filesystem::exists(candidate)) {
+                resolvedPath = candidate;
+                break;
+            }
+        }
+    }
+
+    std::ifstream file(resolvedPath);
     if (!file.is_open()) {
-        LOG_ERROR("Failed to open OBJ file: " + filepath);
+        LOG_ERROR("Failed to open OBJ file: " + resolvedPath);
         return nullptr;
     }
 

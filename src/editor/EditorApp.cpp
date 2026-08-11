@@ -28,6 +28,7 @@ void EditorApp::ApplyDockLayout(ImGuiID dockspaceID) {
     ImGui::DockBuilderDockWindow("Animation Timeline", dockBottom);
     ImGui::DockBuilderDockWindow("Engine Log Console", dockBottom);
     ImGui::DockBuilderDockWindow("Procedural Node Graph Editor", dockBottom);
+    ImGui::DockBuilderDockWindow("Asset Manager", dockBottom);
 
     ImGui::DockBuilderFinish(dockspaceID);
 }
@@ -74,19 +75,23 @@ void EditorApp::ImportModelIntoScene(const std::string& path) {
             m_rootNode = std::make_shared<SceneNode>("Scene Root");
         }
 
+        std::string stemName = std::filesystem::path(path).stem().string();
+        if (stemName.empty()) stemName = "Imported Model";
+
         const auto& loadedChildren = loadedNode->GetChildren();
         if (!loadedChildren.empty()) {
             for (const auto& child : loadedChildren) {
                 if (child->mesh) {
                     m_activeDisplayMesh = child->mesh;
-                    auto importedChild = std::make_unique<SceneNode>(child->name);
+                    std::string nodeName = (loadedChildren.size() == 1) ? stemName : (stemName + " (" + child->name + ")");
+                    auto importedChild = std::make_unique<SceneNode>(nodeName);
                     importedChild->mesh = child->mesh;
                     m_rootNode->AddChild(std::move(importedChild));
                 }
             }
         } else if (loadedNode->mesh) {
             m_activeDisplayMesh = loadedNode->mesh;
-            auto importedChild = std::make_unique<SceneNode>(loadedNode->name);
+            auto importedChild = std::make_unique<SceneNode>(stemName);
             importedChild->mesh = loadedNode->mesh;
             m_rootNode->AddChild(std::move(importedChild));
         }
@@ -343,6 +348,23 @@ EditorApp::EditorApp()
     m_nodeGraphEditorPanel = std::make_unique<khepri::NodeGraphEditorPanel>(*m_context);
     m_assetManagerPanel = std::make_unique<khepri::AssetManagerPanel>();
 
+    // Connect Asset & Viewport callbacks
+    m_assetManagerPanel->SetOpenModelCallback([this](const std::string& path) {
+        OpenSceneModel(path);
+    });
+    m_assetManagerPanel->SetImportModelCallback([this](const std::string& path) {
+        ImportModelIntoScene(path);
+    });
+    m_viewportPanel->SetImportModelCallback([this](const std::string& path) {
+        ImportModelIntoScene(path);
+    });
+    m_sceneTreePanel->SetImportModelCallback([this](const std::string& path) {
+        ImportModelIntoScene(path);
+    });
+    m_sceneTreePanel->SetOpenModelCallback([this](const std::string& path) {
+        OpenSceneModel(path);
+    });
+
     // Register Viewport Texture for ImGui rendering (initial DS creation)
     m_viewportDS = ImGui_ImplVulkan_AddTexture(
         m_viewportPanel->GetSampler(),
@@ -586,6 +608,10 @@ void EditorApp::BuildSampleScene() {
     m_activeDisplayMesh = cubeNode->mesh;
     m_rootNode->AddChild(std::move(cubeNode));
 
+    if (m_nodeGraphEditorPanel) {
+        m_nodeGraphEditorPanel->SetImportedMesh(m_activeDisplayMesh);
+    }
+
     // Sample animation clip — NOT playing on startup (user must press Play)
     auto clip = std::make_shared<AnimationClip>();
     clip->name = "Spin Animation";
@@ -648,9 +674,27 @@ void EditorApp::DrawSceneNode(VkCommandBuffer cmd, SceneNode* node, const glm::m
         push.specularStrength = 0.5f;
         push.ambientStrength = 0.15f;
 
-        vkCmdPushConstants(cmd, m_pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
-                           0, sizeof(PushConstants), &push);
-        targetMesh->Draw(cmd);
+        // 1. Shaded Solid Pass (if Off or Overlay)
+        if (node->wireframeMode != WireframeMode::WireframeOnly) {
+            vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, m_graphicsPipeline);
+            vkCmdPushConstants(cmd, m_pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
+                               0, sizeof(PushConstants), &push);
+            targetMesh->Draw(cmd);
+        }
+
+        // 2. Wireframe Pass (if Overlay or WireframeOnly)
+        if (node->wireframeMode == WireframeMode::Overlay || node->wireframeMode == WireframeMode::WireframeOnly) {
+            vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, m_wireframePipeline);
+            PushConstants wirePush = push;
+            if (node->wireframeMode == WireframeMode::Overlay) {
+                // High-contrast bright cyan overlay lines over solid mesh for topology inspection
+                wirePush.baseColorFactor = glm::vec4(0.0f, 0.0f, 0.0f, 1.0f);
+                wirePush.useTexture = 0;
+            }
+            vkCmdPushConstants(cmd, m_pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
+                               0, sizeof(PushConstants), &wirePush);
+            targetMesh->Draw(cmd);
+        }
     }
 
     // Recurse into children
@@ -826,7 +870,8 @@ void EditorApp::Run() {
                                       m_sceneTreePanel->GetSelectedNode(), m_rootNode.get());
         }
         if (m_showSceneTree && m_sceneTreePanel) {
-            m_sceneTreePanel->RenderUI(m_rootNode.get(), m_activeDisplayMesh);
+            const auto& selectedAsset = m_assetManagerPanel ? m_assetManagerPanel->GetSelectedPath() : std::filesystem::path();
+            m_sceneTreePanel->RenderUI(m_rootNode.get(), m_activeDisplayMesh, selectedAsset);
         }
         if (m_showTimeline && m_timelinePanel) {
             m_timelinePanel->RenderUI(m_timeline, m_sceneTreePanel->GetSelectedNode(), m_rootNode.get());
@@ -837,17 +882,10 @@ void EditorApp::Run() {
         if (m_showNodeGraph && m_nodeGraphEditorPanel) {
             m_nodeGraphEditorPanel->RenderUI(m_activeDisplayMesh);
             
-            // Synchronize active graph output mesh to selected SceneNode (or active mesh node) for live Viewport rendering
+            // Synchronize active graph output mesh to selected SceneNode
             SceneNode* selected = m_sceneTreePanel ? m_sceneTreePanel->GetSelectedNode() : nullptr;
-            if (selected && m_activeDisplayMesh) {
+            if (selected && selected->mesh && m_activeDisplayMesh) {
                 selected->mesh = m_activeDisplayMesh;
-            } else if (m_rootNode && m_activeDisplayMesh) {
-                for (const auto& child : m_rootNode->GetChildren()) {
-                    if (child->mesh) {
-                        child->mesh = m_activeDisplayMesh;
-                        break;
-                    }
-                }
             }
         }
         if (m_showAssetManager && m_assetManagerPanel) {

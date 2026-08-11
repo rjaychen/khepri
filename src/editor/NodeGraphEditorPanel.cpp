@@ -30,22 +30,37 @@ void NodeGraphEditorPanel::SetImportedMesh(std::shared_ptr<MeshComponent> import
     if (!importedMesh) return;
 
     std::shared_ptr<graph::ExternalMeshNode> extNode = nullptr;
+    std::shared_ptr<graph::MeshPrimitiveNode> primNode = nullptr;
+
     for (const auto& [id, node] : m_graph->GetNodes()) {
         if (auto ext = std::dynamic_pointer_cast<graph::ExternalMeshNode>(node)) {
             extNode = ext;
-            break;
+        } else if (auto prim = std::dynamic_pointer_cast<graph::MeshPrimitiveNode>(node)) {
+            primNode = prim;
         }
     }
 
     if (!extNode) {
         extNode = m_graph->CreateNode<graph::ExternalMeshNode>(importedMesh);
-        for (const auto& [id, node] : m_graph->GetNodes()) {
-            if (auto subNode = std::dynamic_pointer_cast<graph::SubdivisionNode>(node)) {
-                (void)m_graph->Connect(extNode->FindOutput("MeshBuffer")->id, subNode->FindInput("MeshBuffer")->id);
-                break;
-            } else if (auto twistNode = std::dynamic_pointer_cast<graph::TwistDeformerNode>(node)) {
-                (void)m_graph->Connect(extNode->FindOutput("MeshBuffer")->id, twistNode->FindInput("MeshBuffer")->id);
-                break;
+        if (primNode) {
+            for (auto& [id, node] : m_graph->GetNodes()) {
+                for (auto& input : node->GetInputs()) {
+                    if (primNode->FindOutput("MeshBuffer") && input.connectedPinId == primNode->FindOutput("MeshBuffer")->id) {
+                        m_graph->Disconnect(input.id);
+                        (void)m_graph->Connect(extNode->FindOutput("MeshBuffer")->id, input.id);
+                    }
+                }
+            }
+            m_graph->RemoveNode(primNode->GetId());
+        } else {
+            for (const auto& [id, node] : m_graph->GetNodes()) {
+                if (auto subNode = std::dynamic_pointer_cast<graph::SubdivisionNode>(node)) {
+                    (void)m_graph->Connect(extNode->FindOutput("MeshBuffer")->id, subNode->FindInput("MeshBuffer")->id);
+                    break;
+                } else if (auto twistNode = std::dynamic_pointer_cast<graph::TwistDeformerNode>(node)) {
+                    (void)m_graph->Connect(extNode->FindOutput("MeshBuffer")->id, twistNode->FindInput("MeshBuffer")->id);
+                    break;
+                }
             }
         }
     } else {

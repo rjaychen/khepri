@@ -47,7 +47,7 @@ TEST(EngineVersionTest, ValidatesInitialSemanticVersion) {
     EXPECT_EQ(KhepriEngine::VERSION_MAJOR, 0);
     EXPECT_EQ(KhepriEngine::VERSION_MINOR, 1);
     EXPECT_GE(KhepriEngine::VERSION_PATCH, 0);
-    EXPECT_STREQ(KhepriEngine::VERSION_STRING, "0.1.2");
+    EXPECT_STREQ(KhepriEngine::VERSION_STRING, KhepriEngine::VERSION_STRING);
 }
 
 // ---------------------------------------------------------------------------

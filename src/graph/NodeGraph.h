@@ -107,6 +107,7 @@ public:
 
     [[nodiscard]] bool Connect(uint32_t outputPinId, uint32_t inputPinId);
     bool Disconnect(uint32_t inputPinId);
+    bool RemoveNode(uint32_t nodeId);
 
     void Evaluate();
     void MarkNodeDirty(uint32_t nodeId);

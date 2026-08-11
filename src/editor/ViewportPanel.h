@@ -8,6 +8,8 @@
 class MeshComponent;
 class SceneNode;
 
+#include <functional>
+
 class ViewportPanel {
 public:
     ViewportPanel(VulkanContext& context);
@@ -46,6 +48,7 @@ public:
     void TransitionToColorAttachment(VkCommandBuffer cmd);
 
     void SetNativeWindow(GLFWwindow* window) { m_window = window; }
+    void SetImportModelCallback(std::function<void(const std::string&)> cb) { m_onImportModel = std::move(cb); }
 
 private:
     VulkanContext& m_context;
@@ -68,4 +71,5 @@ private:
     VkImageView m_depthImageView = VK_NULL_HANDLE;
 
     VkSampler m_sampler = VK_NULL_HANDLE;
+    std::function<void(const std::string&)> m_onImportModel;
 };

@@ -99,6 +99,27 @@ bool NodeGraph::Disconnect(uint32_t inputPinId) {
     return false;
 }
 
+bool NodeGraph::RemoveNode(uint32_t nodeId) {
+    auto it = m_nodes.find(nodeId);
+    if (it == m_nodes.end()) return false;
+
+    for (auto& pin : it->second->GetInputs()) {
+        Disconnect(pin.id);
+    }
+    for (auto& [otherId, node] : m_nodes) {
+        for (auto& pin : node->GetInputs()) {
+            for (const auto& outPin : it->second->GetOutputs()) {
+                if (pin.connectedPinId == outPin.id) {
+                    Disconnect(pin.id);
+                }
+            }
+        }
+    }
+
+    m_nodes.erase(it);
+    return true;
+}
+
 std::shared_ptr<GraphNode> NodeGraph::GetNode(uint32_t id) const noexcept {
     auto it = m_nodes.find(id);
     if (it != m_nodes.end()) return it->second;

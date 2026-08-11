@@ -92,9 +92,18 @@ public:
     static std::shared_ptr<MeshComponent> CreateCube(VulkanContext& context, float size = 1.0f, uint32_t segmentsX = 10, uint32_t segmentsY = 10, uint32_t segmentsZ = 10) {
         return CreateCube(&context, size, segmentsX, segmentsY, segmentsZ);
     }
-    static std::shared_ptr<MeshComponent> CreateSphere(VulkanContext& context, float radius = 0.5f, uint32_t sectors = 32, uint32_t stacks = 16);
-    static std::shared_ptr<MeshComponent> CreatePlane(VulkanContext& context, float size = 10.0f, uint32_t gridSubdivisions = 10);
-    static std::shared_ptr<MeshComponent> CreateCylinder(VulkanContext& context, float radius = 0.5f, float height = 1.0f, uint32_t sectors = 32);
+    static std::shared_ptr<MeshComponent> CreateSphere(VulkanContext* context, float radius = 0.5f, uint32_t sectors = 32, uint32_t stacks = 16);
+    static std::shared_ptr<MeshComponent> CreateSphere(VulkanContext& context, float radius = 0.5f, uint32_t sectors = 32, uint32_t stacks = 16) {
+        return CreateSphere(&context, radius, sectors, stacks);
+    }
+    static std::shared_ptr<MeshComponent> CreatePlane(VulkanContext* context, float size = 10.0f, uint32_t gridSubdivisions = 10);
+    static std::shared_ptr<MeshComponent> CreatePlane(VulkanContext& context, float size = 10.0f, uint32_t gridSubdivisions = 10) {
+        return CreatePlane(&context, size, gridSubdivisions);
+    }
+    static std::shared_ptr<MeshComponent> CreateCylinder(VulkanContext* context, float radius = 0.5f, float height = 1.0f, uint32_t sectors = 32);
+    static std::shared_ptr<MeshComponent> CreateCylinder(VulkanContext& context, float radius = 0.5f, float height = 1.0f, uint32_t sectors = 32) {
+        return CreateCylinder(&context, radius, height, sectors);
+    }
 
     // Topological Mesh Operators
     static std::shared_ptr<MeshComponent> SubdivideMesh(VulkanContext* context, const MeshComponent& inputMesh, uint32_t levels = 1);

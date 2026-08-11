@@ -205,3 +205,23 @@ TEST(NodeGraphTest, SubdivisionNodeCapsDenseMeshSubdivisionLevelsToPreventLag) {
     EXPECT_LE(result->GetIndices().size() / 3, 32000u);
 }
 
+TEST(NodeGraphTest, ExternalMeshNodeReplacesPrimitiveGeneratorToPreventDuplicateInstances) {
+    VulkanContext* nullContext = nullptr;
+    auto testMesh = MeshComponent::CreateCube(nullContext, 1.0f);
+
+    NodeGraph graph;
+    auto primNode = graph.CreateNode<MeshPrimitiveNode>(nullContext, MeshPrimitiveNode::PrimitiveType::Cube);
+    auto subNode  = graph.CreateNode<SubdivisionNode>(nullContext, 1);
+    (void)graph.Connect(primNode->FindOutput("MeshBuffer")->id, subNode->FindInput("MeshBuffer")->id);
+
+    auto extNode  = graph.CreateNode<ExternalMeshNode>(testMesh);
+    (void)graph.Connect(extNode->FindOutput("MeshBuffer")->id, subNode->FindInput("MeshBuffer")->id);
+    graph.RemoveNode(primNode->GetId());
+
+    graph.Evaluate();
+
+    auto outMesh = subNode->GetOutputMesh();
+    ASSERT_NE(outMesh, nullptr);
+    EXPECT_GT(outMesh->GetVertices().size(), 0u);
+}
+

@@ -111,8 +111,7 @@ void ViewportPanel::RenderUI(Camera& camera, VkDescriptorSet& viewportTextureDS,
     // Top Viewport Control Bar
     ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(6, 3));
     ImGui::BeginGroup();
-    ImGui::TextColored(ImVec4(0.3f, 0.8f, 1.0f, 1.0f), "📷 Camera Controls:"); ImGui::SameLine();
-    ImGui::TextDisabled("(Hold RMB + WASDQE / Mouse Drag to Navigate | Press F to Focus)"); ImGui::SameLine();
+    ImGui::TextColored(ImVec4(0.3f, 0.8f, 1.0f, 1.0f), "Viewport Controls"); ImGui::SameLine();
 
     ImGui::SetNextItemWidth(100);
     float flySpeed = camera.GetFlySpeed();
@@ -276,6 +275,16 @@ void ViewportPanel::RenderUI(Camera& camera, VkDescriptorSet& viewportTextureDS,
             if (rmbDown) camera.AdjustFlySpeed(wheel);
             else camera.Zoom(wheel);
         }
+    }
+
+    if (ImGui::BeginDragDropTarget()) {
+        if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("ASSET_PATH_PAYLOAD")) {
+            const char* pathStr = static_cast<const char*>(payload->Data);
+            if (m_onImportModel) {
+                m_onImportModel(pathStr);
+            }
+        }
+        ImGui::EndDragDropTarget();
     }
 
     ImGui::End();

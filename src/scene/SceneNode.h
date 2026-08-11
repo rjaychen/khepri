@@ -12,6 +12,12 @@
 #include "MeshComponent.h"
 #include "LightComponent.h"
 
+enum class WireframeMode {
+    Off = 0,
+    Overlay = 1,
+    WireframeOnly = 2
+};
+
 class SceneNode : public IReflectable {
 public:
     SceneNode(const std::string& name = "Node");
@@ -31,6 +37,9 @@ public:
 
     // Visibility — if false, node and all children are skipped during rendering
     bool visible = true;
+
+    // Wireframe rendering option per mesh node
+    WireframeMode wireframeMode = WireframeMode::Off;
 
     glm::mat4 GetLocalTransform() const;
     glm::mat4 GetWorldTransform() const;
