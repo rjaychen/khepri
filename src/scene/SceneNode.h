@@ -12,6 +12,8 @@
 #include "MeshComponent.h"
 #include "LightComponent.h"
 
+namespace khepri::graph { class NodeGraph; }
+
 enum class WireframeMode {
     Off = 0,
     Overlay = 1,
@@ -28,6 +30,10 @@ public:
     static uint32_t s_nextId;
     std::shared_ptr<MeshComponent> mesh;
     std::shared_ptr<LightComponent> lightComponent;
+    std::shared_ptr<khepri::graph::NodeGraph> nodeGraph;
+
+    std::shared_ptr<khepri::graph::NodeGraph> GetOrCreateNodeGraph(VulkanContext* context = nullptr);
+    void EvaluateNodeGraph(bool propagateToChildren = false);
 
     // Transform properties
     glm::vec3 position{0.0f, 0.0f, 0.0f};

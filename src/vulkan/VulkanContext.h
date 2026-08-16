@@ -37,6 +37,14 @@ public:
     QueueFamilyIndices GetQueueFamilies() const { return m_queueIndices; }
     VmaAllocator GetAllocator() const { return m_allocator; }
     VkPhysicalDeviceProperties GetDeviceProperties() const { return m_deviceProperties; }
+    VkSampleCountFlagBits GetMaxUsableSampleCount() const {
+        VkSampleCountFlags counts = m_deviceProperties.limits.framebufferColorSampleCounts &
+                                    m_deviceProperties.limits.framebufferDepthSampleCounts;
+        if (counts & VK_SAMPLE_COUNT_8_BIT) return VK_SAMPLE_COUNT_8_BIT;
+        if (counts & VK_SAMPLE_COUNT_4_BIT) return VK_SAMPLE_COUNT_4_BIT;
+        if (counts & VK_SAMPLE_COUNT_2_BIT) return VK_SAMPLE_COUNT_2_BIT;
+        return VK_SAMPLE_COUNT_1_BIT;
+    }
 
     void WaitIdle() const { vkDeviceWaitIdle(m_device); }
     void ImmediateSubmit(std::function<void(VkCommandBuffer cmd)>&& action) const;

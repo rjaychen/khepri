@@ -1,4 +1,5 @@
 #include "SceneTreePanel.h"
+#include "NodeGraphEditorPanel.h"
 #include "../scene/MeshComponent.h"
 #include <glm/gtc/type_ptr.hpp>
 
@@ -9,7 +10,8 @@ SceneTreePanel::SceneTreePanel(VulkanContext& context)
 #include <fstream>
 
 void SceneTreePanel::RenderUI(SceneNode* rootNode, std::shared_ptr<MeshComponent>& activeMesh,
-                              const std::filesystem::path& selectedAssetPath) {
+                              const std::filesystem::path& selectedAssetPath,
+                              khepri::NodeGraphEditorPanel* nodeGraphPanel) {
     ImGui::Begin("Scene Hierarchy");
 
     // --- Add Dropdown Section ---
@@ -119,7 +121,12 @@ void SceneTreePanel::RenderUI(SceneNode* rootNode, std::shared_ptr<MeshComponent
     // --- Inspector Panel ---
     ImGui::Begin("Inspector");
     if (m_selectedNode) {
-        RenderInspector(m_selectedNode, selectedAssetPath);
+        RenderInspector(m_selectedNode, selectedAssetPath, nodeGraphPanel);
+    } else if (nodeGraphPanel && nodeGraphPanel->GetSelectedNodeId() != 0) {
+        // No scene node selected but a graph node is selected — show its properties
+        ImGui::TextColored(ImVec4(0.3f, 0.8f, 1.0f, 1.0f), "Node Graph Properties");
+        ImGui::Separator();
+        nodeGraphPanel->RenderNodePropertiesInspector();
     } else if (!selectedAssetPath.empty()) {
         RenderFileAssetInspector(selectedAssetPath);
     } else {
@@ -317,7 +324,8 @@ void SceneTreePanel::RenderNodeTree(SceneNode* node) {
     ImGui::PopID();
 }
 
-void SceneTreePanel::RenderInspector(SceneNode* node, const std::filesystem::path& selectedAssetPath) {
+void SceneTreePanel::RenderInspector(SceneNode* node, const std::filesystem::path& selectedAssetPath,
+                                      khepri::NodeGraphEditorPanel* nodeGraphPanel) {
     (void)selectedAssetPath;
     char nameBuf[256];
     strncpy(nameBuf, node->name.c_str(), sizeof(nameBuf));
@@ -409,6 +417,14 @@ void SceneTreePanel::RenderInspector(SceneNode* node, const std::filesystem::pat
         glm::vec4 colorFactor = node->mesh->GetBaseColorFactor();
         if (ImGui::ColorEdit4("Base Color Factor", glm::value_ptr(colorFactor))) {
             node->mesh->SetBaseColorFactor(colorFactor);
+        }
+    }
+
+    // Node Graph Properties section (shows when a graph node is also selected)
+    if (nodeGraphPanel && nodeGraphPanel->GetSelectedNodeId() != 0) {
+        ImGui::Spacing();
+        if (ImGui::CollapsingHeader("Node Graph Properties", ImGuiTreeNodeFlags_DefaultOpen)) {
+            nodeGraphPanel->RenderNodePropertiesInspector();
         }
     }
 }

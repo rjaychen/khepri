@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.20)
 set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
-project(KhepriEngine VERSION 0.1.4 LANGUAGES C CXX)
+project(KhepriEngine VERSION 0.1.5 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -193,11 +193,13 @@ if(BUILD_TESTS)
         tests/MainTests.cpp
         tests/HalfEdgeTests.cpp
         tests/NodeGraphTests.cpp
+        tests/NodeGraphEditorUITests.cpp
         tests/ModelImporterTests.cpp
         tests/SceneHierarchyTests.cpp
         tests/AssetManagerTests.cpp
         src/graph/NodeGraph.cpp
         src/graph/GeometryNodes.cpp
+        src/editor/NodeGraphEditorPanel.cpp
         src/material/Material.cpp
         src/assets/AssetManager.cpp
         src/mesh/HalfEdgeMesh.cpp
@@ -215,6 +217,7 @@ if(BUILD_TESTS)
         src/animation/Rigging.cpp
         src/vulkan/Buffer.cpp
         src/vulkan/Descriptors.cpp
+        src/vulkan/Pipeline.cpp
         src/vulkan/Texture.cpp
         src/vulkan/VulkanContext.cpp
     )
@@ -234,6 +237,7 @@ if(BUILD_TESTS)
         gtest_main
         glfw
         volk
+        imgui
         Vulkan-Headers
         glm::glm
     )

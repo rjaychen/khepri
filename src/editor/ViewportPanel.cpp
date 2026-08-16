@@ -34,20 +34,39 @@ ViewportPanel::~ViewportPanel() {
     if (m_colorImage) vmaDestroyImage(m_context.GetAllocator(), m_colorImage, m_colorImageAllocation);
     if (m_depthImageView) vkDestroyImageView(m_context.GetDevice(), m_depthImageView, nullptr);
     if (m_depthImage) vmaDestroyImage(m_context.GetAllocator(), m_depthImage, m_depthImageAllocation);
+    if (m_msaaColorImageView) vkDestroyImageView(m_context.GetDevice(), m_msaaColorImageView, nullptr);
+    if (m_msaaColorImage) vmaDestroyImage(m_context.GetAllocator(), m_msaaColorImage, m_msaaColorImageAllocation);
+    if (m_msaaDepthImageView) vkDestroyImageView(m_context.GetDevice(), m_msaaDepthImageView, nullptr);
+    if (m_msaaDepthImage) vmaDestroyImage(m_context.GetAllocator(), m_msaaDepthImage, m_msaaDepthImageAllocation);
+}
+
+void ViewportPanel::SetMSAASamples(VkSampleCountFlagBits samples) {
+    if (m_msaaSamples != samples) {
+        m_msaaSamples = samples;
+        m_needTextureUpdate = true;
+        CreateFramebuffer(m_width, m_height);
+    }
 }
 
 void ViewportPanel::CreateFramebuffer(uint32_t width, uint32_t height) {
     if (width == 0 || height == 0) return;
     m_context.WaitIdle();
-    if (m_colorImageView) vkDestroyImageView(m_context.GetDevice(), m_colorImageView, nullptr);
-    if (m_colorImage) vmaDestroyImage(m_context.GetAllocator(), m_colorImage, m_colorImageAllocation);
-    if (m_depthImageView) vkDestroyImageView(m_context.GetDevice(), m_depthImageView, nullptr);
-    if (m_depthImage) vmaDestroyImage(m_context.GetAllocator(), m_depthImage, m_depthImageAllocation);
+    if (m_colorImageView) { vkDestroyImageView(m_context.GetDevice(), m_colorImageView, nullptr); m_colorImageView = VK_NULL_HANDLE; }
+    if (m_colorImage) { vmaDestroyImage(m_context.GetAllocator(), m_colorImage, m_colorImageAllocation); m_colorImage = VK_NULL_HANDLE; }
+    if (m_depthImageView) { vkDestroyImageView(m_context.GetDevice(), m_depthImageView, nullptr); m_depthImageView = VK_NULL_HANDLE; }
+    if (m_depthImage) { vmaDestroyImage(m_context.GetAllocator(), m_depthImage, m_depthImageAllocation); m_depthImage = VK_NULL_HANDLE; }
+    if (m_msaaColorImageView) { vkDestroyImageView(m_context.GetDevice(), m_msaaColorImageView, nullptr); m_msaaColorImageView = VK_NULL_HANDLE; }
+    if (m_msaaColorImage) { vmaDestroyImage(m_context.GetAllocator(), m_msaaColorImage, m_msaaColorImageAllocation); m_msaaColorImage = VK_NULL_HANDLE; }
+    if (m_msaaDepthImageView) { vkDestroyImageView(m_context.GetDevice(), m_msaaDepthImageView, nullptr); m_msaaDepthImageView = VK_NULL_HANDLE; }
+    if (m_msaaDepthImage) { vmaDestroyImage(m_context.GetAllocator(), m_msaaDepthImage, m_msaaDepthImageAllocation); m_msaaDepthImage = VK_NULL_HANDLE; }
 
     m_width = width;
     m_height = height;
 
-    // Color Image
+    VmaAllocationCreateInfo allocInfo{};
+    allocInfo.usage = VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE;
+
+    // 1. Resolve / Standard 1x Color Image (Sampled by ImGui)
     VkImageCreateInfo imgInfo{};
     imgInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
     imgInfo.imageType = VK_IMAGE_TYPE_2D;
@@ -60,9 +79,6 @@ void ViewportPanel::CreateFramebuffer(uint32_t width, uint32_t height) {
     imgInfo.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
     imgInfo.samples = VK_SAMPLE_COUNT_1_BIT;
     imgInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-
-    VmaAllocationCreateInfo allocInfo{};
-    allocInfo.usage = VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE;
 
     vmaCreateImage(m_context.GetAllocator(), &imgInfo, &allocInfo, &m_colorImage, &m_colorImageAllocation, nullptr);
 
@@ -77,18 +93,43 @@ void ViewportPanel::CreateFramebuffer(uint32_t width, uint32_t height) {
 
     vkCreateImageView(m_context.GetDevice(), &viewInfo, nullptr, &m_colorImageView);
 
-    // Depth Image
-    VkImageCreateInfo depthInfo = imgInfo;
-    depthInfo.format = VK_FORMAT_D32_SFLOAT;
-    depthInfo.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
+    // 2. Multisampled Attachments (if MSAA enabled > 1x)
+    if (m_msaaSamples > VK_SAMPLE_COUNT_1_BIT) {
+        // MSAA Color Attachment
+        VkImageCreateInfo msaaColorInfo = imgInfo;
+        msaaColorInfo.samples = m_msaaSamples;
+        msaaColorInfo.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSIENT_ATTACHMENT_BIT;
 
-    vmaCreateImage(m_context.GetAllocator(), &depthInfo, &allocInfo, &m_depthImage, &m_depthImageAllocation, nullptr);
+        vmaCreateImage(m_context.GetAllocator(), &msaaColorInfo, &allocInfo, &m_msaaColorImage, &m_msaaColorImageAllocation, nullptr);
 
-    viewInfo.image = m_depthImage;
-    viewInfo.format = VK_FORMAT_D32_SFLOAT;
-    viewInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
+        viewInfo.image = m_msaaColorImage;
+        vkCreateImageView(m_context.GetDevice(), &viewInfo, nullptr, &m_msaaColorImageView);
 
-    vkCreateImageView(m_context.GetDevice(), &viewInfo, nullptr, &m_depthImageView);
+        // MSAA Depth Attachment
+        VkImageCreateInfo msaaDepthInfo = msaaColorInfo;
+        msaaDepthInfo.format = VK_FORMAT_D32_SFLOAT;
+        msaaDepthInfo.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSIENT_ATTACHMENT_BIT;
+
+        vmaCreateImage(m_context.GetAllocator(), &msaaDepthInfo, &allocInfo, &m_msaaDepthImage, &m_msaaDepthImageAllocation, nullptr);
+
+        viewInfo.image = m_msaaDepthImage;
+        viewInfo.format = VK_FORMAT_D32_SFLOAT;
+        viewInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
+        vkCreateImageView(m_context.GetDevice(), &viewInfo, nullptr, &m_msaaDepthImageView);
+    } else {
+        // 1x Depth Image
+        VkImageCreateInfo depthInfo = imgInfo;
+        depthInfo.format = VK_FORMAT_D32_SFLOAT;
+        depthInfo.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
+
+        vmaCreateImage(m_context.GetAllocator(), &depthInfo, &allocInfo, &m_depthImage, &m_depthImageAllocation, nullptr);
+
+        viewInfo.image = m_depthImage;
+        viewInfo.format = VK_FORMAT_D32_SFLOAT;
+        viewInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
+
+        vkCreateImageView(m_context.GetDevice(), &viewInfo, nullptr, &m_depthImageView);
+    }
 }
 
 void ViewportPanel::RenderUI(Camera& camera, VkDescriptorSet& viewportTextureDS, float deltaTime, const SceneNode* selectedNode, const SceneNode* rootNode) {
@@ -146,6 +187,31 @@ void ViewportPanel::RenderUI(Camera& camera, VkDescriptorSet& viewportTextureDS,
     }
 
     ImGui::SameLine();
+    ImGui::SetNextItemWidth(130.0f);
+    const char* aaOptions[] = { "AA: Off (1x)", "AA: 2x MSAA", "AA: 4x MSAA", "AA: 8x (Best)" };
+    int currentAA = 3;
+    if (m_msaaSamples == VK_SAMPLE_COUNT_1_BIT) currentAA = 0;
+    else if (m_msaaSamples == VK_SAMPLE_COUNT_2_BIT) currentAA = 1;
+    else if (m_msaaSamples == VK_SAMPLE_COUNT_4_BIT) currentAA = 2;
+    else if (m_msaaSamples == VK_SAMPLE_COUNT_8_BIT) currentAA = 3;
+
+    if (ImGui::Combo("##AA", &currentAA, aaOptions, IM_ARRAYSIZE(aaOptions))) {
+        VkSampleCountFlagBits newSamples = VK_SAMPLE_COUNT_8_BIT;
+        if (currentAA == 0) newSamples = VK_SAMPLE_COUNT_1_BIT;
+        else if (currentAA == 1) newSamples = VK_SAMPLE_COUNT_2_BIT;
+        else if (currentAA == 2) newSamples = VK_SAMPLE_COUNT_4_BIT;
+        else if (currentAA == 3) newSamples = VK_SAMPLE_COUNT_8_BIT;
+
+        VkSampleCountFlagBits maxSamples = m_context.GetMaxUsableSampleCount();
+        if (newSamples > maxSamples) newSamples = maxSamples;
+
+        SetMSAASamples(newSamples);
+    }
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip("Anti-Aliasing Quality\n8x MSAA provides smooth hardware edge anti-aliasing for viewport rendering.");
+    }
+
+    ImGui::SameLine();
     ImGui::TextColored(ImVec4(0.5f, 0.9f, 0.5f, 1.0f), "[%ux%u px]", m_width, m_height);
     ImGui::EndGroup();
     ImGui::PopStyleVar();
@@ -193,11 +259,15 @@ void ViewportPanel::RenderUI(Camera& camera, VkDescriptorSet& viewportTextureDS,
                 break;
         }
 
-        if (targetWidth != m_width || targetHeight != m_height) {
+        if (targetWidth != m_width || targetHeight != m_height || m_needTextureUpdate) {
+            bool dimsChanged = (targetWidth != m_width || targetHeight != m_height);
+            m_needTextureUpdate = false;
             VkDescriptorSet oldDS = viewportTextureDS;
             viewportTextureDS = VK_NULL_HANDLE;
-            CreateFramebuffer(targetWidth, targetHeight);
-            camera.SetViewportSize(static_cast<float>(targetWidth), static_cast<float>(targetHeight));
+            if (dimsChanged) {
+                CreateFramebuffer(targetWidth, targetHeight);
+                camera.SetViewportSize(static_cast<float>(targetWidth), static_cast<float>(targetHeight));
+            }
             if (oldDS != VK_NULL_HANDLE) {
                 ImGui_ImplVulkan_RemoveTexture(oldDS);
             }
@@ -213,11 +283,6 @@ void ViewportPanel::RenderUI(Camera& camera, VkDescriptorSet& viewportTextureDS,
         ImGui::Image((ImTextureID)viewportTextureDS, viewportSize);
     }
 
-    // Hotkey Focus ('F')
-    if ((m_isFocused || m_isHovered) && ImGui::IsKeyPressed(ImGuiKey_F)) {
-        focusOnNode();
-    }
-
     // Unreal Engine Camera Controls (RMB Fly/Look, RMB+LMB / MMB Pan, LMB Orbit, WASDQE Fly)
     bool rmbDown = ImGui::IsMouseDown(ImGuiMouseButton_Right);
     bool lmbDown = ImGui::IsMouseDown(ImGuiMouseButton_Left);
@@ -225,7 +290,6 @@ void ViewportPanel::RenderUI(Camera& camera, VkDescriptorSet& viewportTextureDS,
 
     if ((m_isHovered || m_isFocused) && !ImGui::IsAnyItemActive()) {
         if (rmbDown && lmbDown) {
-            // RMB + LMB Drag: Viewplane Pan (Unreal Engine standard)
             ImVec2 delta = ImGui::GetMouseDragDelta(ImGuiMouseButton_Right);
             ImGui::ResetMouseDragDelta(ImGuiMouseButton_Right);
             ImGui::ResetMouseDragDelta(ImGuiMouseButton_Left);
@@ -233,21 +297,18 @@ void ViewportPanel::RenderUI(Camera& camera, VkDescriptorSet& viewportTextureDS,
                 camera.Pan(delta.x, delta.y);
             }
         } else if (rmbDown) {
-            // RMB Drag: First-Person Look / Turn
             ImVec2 delta = ImGui::GetMouseDragDelta(ImGuiMouseButton_Right);
             ImGui::ResetMouseDragDelta(ImGuiMouseButton_Right);
             if (std::abs(delta.x) > 0.01f || std::abs(delta.y) > 0.01f) {
                 camera.Look(delta.x, delta.y);
             }
         } else if (mmbDown) {
-            // MMB Drag: Viewplane Pan
             ImVec2 delta = ImGui::GetMouseDragDelta(ImGuiMouseButton_Middle);
             ImGui::ResetMouseDragDelta(ImGuiMouseButton_Middle);
             if (std::abs(delta.x) > 0.01f || std::abs(delta.y) > 0.01f) {
                 camera.Pan(delta.x, delta.y);
             }
         } else if (lmbDown) {
-            // LMB Drag: Orbit View
             ImVec2 delta = ImGui::GetMouseDragDelta(ImGuiMouseButton_Left);
             ImGui::ResetMouseDragDelta(ImGuiMouseButton_Left);
             if (std::abs(delta.x) > 0.01f || std::abs(delta.y) > 0.01f) {
@@ -256,7 +317,6 @@ void ViewportPanel::RenderUI(Camera& camera, VkDescriptorSet& viewportTextureDS,
         }
 
         if (rmbDown) {
-            // WASDQE Fly Movement (E = Up, Q = Down - Unreal Engine Standard)
             glm::vec3 moveDir(0.0f);
             if (ImGui::IsKeyDown(ImGuiKey_W)) moveDir.z += 1.0f;
             if (ImGui::IsKeyDown(ImGuiKey_S)) moveDir.z -= 1.0f;
@@ -277,6 +337,7 @@ void ViewportPanel::RenderUI(Camera& camera, VkDescriptorSet& viewportTextureDS,
         }
     }
 
+    // Drag-and-drop model files directly into 3D viewport canvas
     if (ImGui::BeginDragDropTarget()) {
         if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("ASSET_PATH_PAYLOAD")) {
             const char* pathStr = static_cast<const char*>(payload->Data);
@@ -292,39 +353,52 @@ void ViewportPanel::RenderUI(Camera& camera, VkDescriptorSet& viewportTextureDS,
 }
 
 void ViewportPanel::TransitionToColorAttachment(VkCommandBuffer cmd) {
-    VkImageMemoryBarrier barriers[2]{};
+    std::vector<VkImageMemoryBarrier> barriers;
 
-    // Color Attachment Barrier
-    barriers[0].sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-    barriers[0].oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-    barriers[0].newLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-    barriers[0].srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-    barriers[0].dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-    barriers[0].image = m_colorImage;
-    barriers[0].subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-    barriers[0].subresourceRange.levelCount = 1;
-    barriers[0].subresourceRange.layerCount = 1;
-    barriers[0].srcAccessMask = 0;
-    barriers[0].dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+    // Resolve / Standard 1x Color Image Barrier
+    VkImageMemoryBarrier b0{};
+    b0.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    b0.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    b0.newLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+    b0.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    b0.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    b0.image = m_colorImage;
+    b0.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    b0.subresourceRange.levelCount = 1;
+    b0.subresourceRange.layerCount = 1;
+    b0.srcAccessMask = 0;
+    b0.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+    barriers.push_back(b0);
 
-    // Depth Attachment Barrier
-    barriers[1].sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-    barriers[1].oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-    barriers[1].newLayout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL;
-    barriers[1].srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-    barriers[1].dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-    barriers[1].image = m_depthImage;
-    barriers[1].subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
-    barriers[1].subresourceRange.levelCount = 1;
-    barriers[1].subresourceRange.layerCount = 1;
-    barriers[1].srcAccessMask = 0;
-    barriers[1].dstAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+    if (m_msaaSamples > VK_SAMPLE_COUNT_1_BIT) {
+        // MSAA Color Image Barrier
+        VkImageMemoryBarrier bMsaaColor = b0;
+        bMsaaColor.image = m_msaaColorImage;
+        barriers.push_back(bMsaaColor);
+
+        // MSAA Depth Image Barrier
+        VkImageMemoryBarrier bMsaaDepth = b0;
+        bMsaaDepth.image = m_msaaDepthImage;
+        bMsaaDepth.newLayout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL;
+        bMsaaDepth.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
+        bMsaaDepth.dstAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+        barriers.push_back(bMsaaDepth);
+    } else {
+        // 1x Depth Image Barrier
+        VkImageMemoryBarrier bDepth = b0;
+        bDepth.image = m_depthImage;
+        bDepth.newLayout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL;
+        bDepth.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
+        bDepth.dstAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+        barriers.push_back(bDepth);
+    }
 
     vkCmdPipelineBarrier(
         cmd,
         VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
         VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT,
-        0, 0, nullptr, 0, nullptr, 2, barriers
+        0, 0, nullptr, 0, nullptr,
+        static_cast<uint32_t>(barriers.size()), barriers.data()
     );
 }
 

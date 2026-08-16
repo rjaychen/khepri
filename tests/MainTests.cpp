@@ -1,3 +1,4 @@
+#include <glm/gtc/epsilon.hpp>
 #include <gtest/gtest.h>
 #include <gmock/gmock.h>
 #include "core/Version.h"
@@ -8,7 +9,7 @@
 #include "animation/Timeline.h"
 #include "mesh/ExactPredicates.h"
 #include "mesh/HalfEdgeMesh.h"
-#include <glm/gtc/epsilon.hpp>
+#include "vulkan/Pipeline.h"
 
 // ---------------------------------------------------------------------------
 // Camera Focus Unit Tests (Google Mock & Google Test)
@@ -48,6 +49,15 @@ TEST(EngineVersionTest, ValidatesInitialSemanticVersion) {
     EXPECT_EQ(KhepriEngine::VERSION_MINOR, 1);
     EXPECT_GE(KhepriEngine::VERSION_PATCH, 0);
     EXPECT_STREQ(KhepriEngine::VERSION_STRING, KhepriEngine::VERSION_STRING);
+}
+
+TEST(PipelineMultisamplingTest, MultisamplingConfiguresSampleCountCorrectly) {
+    PipelineBuilder builder;
+    builder.SetMultisampling(VK_SAMPLE_COUNT_8_BIT, false);
+    builder.SetMultisampling(VK_SAMPLE_COUNT_4_BIT, false);
+    builder.SetMultisampling(VK_SAMPLE_COUNT_2_BIT, false);
+    builder.SetMultisampling(VK_SAMPLE_COUNT_1_BIT, false);
+    SUCCEED();
 }
 
 // ---------------------------------------------------------------------------

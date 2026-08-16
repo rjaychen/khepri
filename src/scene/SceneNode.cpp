@@ -96,3 +96,47 @@ void SceneNode::SyncTransformToProperties() {
         scale = std::get<glm::vec3>(m_properties[2].value);
     }
 }
+
+#include "../graph/NodeGraph.h"
+#include "../graph/GeometryNodes.h"
+
+std::shared_ptr<khepri::graph::NodeGraph> SceneNode::GetOrCreateNodeGraph(VulkanContext* context) {
+    if (!nodeGraph) {
+        nodeGraph = std::make_shared<khepri::graph::NodeGraph>();
+        if (mesh) {
+            // Seed graph with an ExternalMeshNode referencing the initial mesh
+            auto extNode = nodeGraph->CreateNode<khepri::graph::ExternalMeshNode>(mesh);
+            (void)extNode;
+        } else if (context) {
+            auto primNode = nodeGraph->CreateNode<khepri::graph::MeshPrimitiveNode>(context, khepri::graph::MeshPrimitiveNode::PrimitiveType::Cube);
+            (void)primNode;
+        }
+        EvaluateNodeGraph(false);
+    }
+    return nodeGraph;
+}
+
+void SceneNode::EvaluateNodeGraph(bool propagateToChildren) {
+    if (nodeGraph) {
+        nodeGraph->Evaluate();
+
+        // Find terminal geometry output or last produced mesh
+        std::shared_ptr<MeshComponent> outMesh = nullptr;
+        for (const auto& [id, gNode] : nodeGraph->GetNodes()) {
+            if (auto m = gNode->GetOutputMesh()) {
+                outMesh = m;
+            }
+        }
+        if (outMesh) {
+            mesh = outMesh;
+        }
+    }
+
+    if (propagateToChildren) {
+        for (auto& child : m_children) {
+            if (child) {
+                child->EvaluateNodeGraph(true);
+            }
+        }
+    }
+}

@@ -40,6 +40,11 @@ public:
 
     VkImageView GetColorImageView() const { return m_colorImageView; }
     VkImageView GetDepthImageView() const { return m_depthImageView; }
+    VkImageView GetMSAAColorImageView() const { return m_msaaColorImageView; }
+    VkImageView GetMSAADepthImageView() const { return m_msaaDepthImageView; }
+    VkSampleCountFlagBits GetMSAASamples() const { return m_msaaSamples; }
+    void SetMSAASamples(VkSampleCountFlagBits samples);
+
     VkSampler GetSampler() const { return m_sampler; }
     VkImage GetColorImage() const { return m_colorImage; }
     VkImage GetDepthImage() const { return m_depthImage; }
@@ -56,6 +61,8 @@ private:
     uint32_t m_width = 800;
     uint32_t m_height = 600;
     ResolutionMode m_resMode = ResolutionMode::FitPanel;
+    VkSampleCountFlagBits m_msaaSamples = VK_SAMPLE_COUNT_8_BIT; // Default: 8x MSAA (Best Anti-Aliasing!)
+    bool m_needTextureUpdate = false;
     bool m_isFocused = false;
     bool m_isHovered = false;
     bool m_cursorLocked = false;
@@ -69,6 +76,14 @@ private:
     VkImage m_depthImage = VK_NULL_HANDLE;
     VmaAllocation m_depthImageAllocation = VK_NULL_HANDLE;
     VkImageView m_depthImageView = VK_NULL_HANDLE;
+
+    VkImage m_msaaColorImage = VK_NULL_HANDLE;
+    VmaAllocation m_msaaColorImageAllocation = VK_NULL_HANDLE;
+    VkImageView m_msaaColorImageView = VK_NULL_HANDLE;
+
+    VkImage m_msaaDepthImage = VK_NULL_HANDLE;
+    VmaAllocation m_msaaDepthImageAllocation = VK_NULL_HANDLE;
+    VkImageView m_msaaDepthImageView = VK_NULL_HANDLE;
 
     VkSampler m_sampler = VK_NULL_HANDLE;
     std::function<void(const std::string&)> m_onImportModel;

@@ -5,7 +5,7 @@
 MeshComponent::MeshComponent(VulkanContext* context, const std::vector<Vertex>& vertices, const std::vector<uint32_t>& indices)
     : m_context(context), m_vertices(vertices), m_indices(indices) {
     
-    if (!context || vertices.empty() || indices.empty()) {
+    if (!context || context->GetDevice() == VK_NULL_HANDLE || context->GetAllocator() == VK_NULL_HANDLE || vertices.empty() || indices.empty()) {
         if (vertices.empty() || indices.empty()) {
             LOG_WARN("MeshComponent initialized with empty vertex/index data");
         }

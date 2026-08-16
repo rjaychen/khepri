@@ -32,7 +32,7 @@ public:
         MarkDirty();
     }
 
-    [[nodiscard]] std::shared_ptr<MeshComponent> GetOutputMesh() const noexcept { return m_outputMesh; }
+    [[nodiscard]] std::shared_ptr<MeshComponent> GetOutputMesh() const noexcept override { return m_outputMesh; }
 
 private:
     VulkanContext* m_context{nullptr};
@@ -55,7 +55,7 @@ public:
         MarkDirty();
     }
 
-    [[nodiscard]] std::shared_ptr<MeshComponent> GetOutputMesh() const noexcept { return m_outputMesh; }
+    [[nodiscard]] std::shared_ptr<MeshComponent> GetOutputMesh() const noexcept override { return m_outputMesh; }
 
 private:
     std::shared_ptr<MeshComponent> m_outputMesh{nullptr};
@@ -78,11 +78,14 @@ public:
         MarkDirty();
     }
 
-    [[nodiscard]] std::shared_ptr<MeshComponent> GetOutputMesh() const noexcept { return m_outputMesh; }
+    [[nodiscard]] std::shared_ptr<MeshComponent> GetOutputMesh() const noexcept override { return m_outputMesh; }
+    [[nodiscard]] bool GetApplyToChildren() const noexcept { return m_applyToChildren; }
+    void SetApplyToChildren(bool apply) noexcept { m_applyToChildren = apply; MarkDirty(); }
 
 private:
     VulkanContext* m_context{nullptr};
     uint32_t m_levels{2};
+    bool m_applyToChildren{false};
     std::shared_ptr<MeshComponent> m_outputMesh{nullptr};
 };
 
@@ -103,11 +106,14 @@ public:
         MarkDirty();
     }
 
-    [[nodiscard]] std::shared_ptr<MeshComponent> GetOutputMesh() const noexcept { return m_outputMesh; }
+    [[nodiscard]] std::shared_ptr<MeshComponent> GetOutputMesh() const noexcept override { return m_outputMesh; }
+    [[nodiscard]] bool GetApplyToChildren() const noexcept { return m_applyToChildren; }
+    void SetApplyToChildren(bool apply) noexcept { m_applyToChildren = apply; MarkDirty(); }
 
 private:
     VulkanContext* m_context{nullptr};
     float m_angle{45.0f}; // degrees
+    bool m_applyToChildren{false};
     std::shared_ptr<MeshComponent> m_outputMesh{nullptr};
 };
 
@@ -120,12 +126,53 @@ public:
 
     void Evaluate() override;
 
-    [[nodiscard]] std::shared_ptr<MeshComponent> GetOutputMesh() const noexcept { return m_outputMesh; }
+    [[nodiscard]] std::shared_ptr<MeshComponent> GetOutputMesh() const noexcept override { return m_outputMesh; }
+    [[nodiscard]] bool GetApplyToChildren() const noexcept { return m_applyToChildren; }
+    void SetApplyToChildren(bool apply) noexcept { m_applyToChildren = apply; MarkDirty(); }
 
 private:
     VulkanContext* m_context{nullptr};
     OpType m_opType;
+    bool m_applyToChildren{false};
     std::shared_ptr<MeshComponent> m_outputMesh{nullptr};
+};
+
+// Outputs a scalar float value for procedural node parameters
+class FloatNode : public GraphNode {
+public:
+    FloatNode(uint32_t id, float initialValue = 1.0f) noexcept;
+
+    void Evaluate() override;
+
+    [[nodiscard]] float GetValue() const noexcept { return m_value; }
+    void SetValue(float value) noexcept {
+        m_value = value;
+        auto* outPin = FindOutput("Value");
+        if (outPin) outPin->value = m_value;
+        MarkDirty();
+    }
+
+private:
+    float m_value{1.0f};
+};
+
+// Outputs a 3D vector for procedural node parameters
+class Vector3Node : public GraphNode {
+public:
+    Vector3Node(uint32_t id, const glm::vec3& initialValue = glm::vec3(0.0f)) noexcept;
+
+    void Evaluate() override;
+
+    [[nodiscard]] const glm::vec3& GetValue() const noexcept { return m_value; }
+    void SetValue(const glm::vec3& value) noexcept {
+        m_value = value;
+        auto* outPin = FindOutput("Value");
+        if (outPin) outPin->value = m_value;
+        MarkDirty();
+    }
+
+private:
+    glm::vec3 m_value{0.0f};
 };
 
 } // namespace khepri::graph

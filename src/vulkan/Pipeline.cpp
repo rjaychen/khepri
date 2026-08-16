@@ -47,10 +47,14 @@ PipelineBuilder& PipelineBuilder::SetCullMode(VkCullModeFlags cullMode, VkFrontF
 }
 
 PipelineBuilder& PipelineBuilder::SetMultisamplingNone() {
+    return SetMultisampling(VK_SAMPLE_COUNT_1_BIT, false);
+}
+
+PipelineBuilder& PipelineBuilder::SetMultisampling(VkSampleCountFlagBits samples, bool sampleShading) {
     m_multisampling.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
-    m_multisampling.sampleShadingEnable = VK_FALSE;
-    m_multisampling.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
-    m_multisampling.minSampleShading = 1.0f;
+    m_multisampling.sampleShadingEnable = sampleShading ? VK_TRUE : VK_FALSE;
+    m_multisampling.rasterizationSamples = samples;
+    m_multisampling.minSampleShading = sampleShading ? 0.2f : 1.0f;
     m_multisampling.pSampleMask = nullptr;
     m_multisampling.alphaToCoverageEnable = VK_FALSE;
     m_multisampling.alphaToOneEnable = VK_FALSE;

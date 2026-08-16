@@ -8,13 +8,18 @@
 #include <filesystem>
 #include <functional>
 
+// Forward declaration to avoid circular include with NodeGraphEditorPanel.h
+namespace khepri { class NodeGraphEditorPanel; }
+
 class SceneTreePanel {
 public:
     SceneTreePanel(VulkanContext& context);
 
-    // activeMesh is updated when a new primitive is added so EditorApp can focus camera on it
+    // activeMesh is updated when a new primitive is added so EditorApp can focus camera on it.
+    // nodeGraphPanel (optional) is used to render the Node Properties section in the Inspector.
     void RenderUI(SceneNode* rootNode, std::shared_ptr<MeshComponent>& activeMesh,
-                  const std::filesystem::path& selectedAssetPath = "");
+                  const std::filesystem::path& selectedAssetPath = "",
+                  khepri::NodeGraphEditorPanel* nodeGraphPanel = nullptr);
 
     SceneNode* GetSelectedNode() const { return m_selectedNode; }
     void ClearSelectedNode() { m_selectedNode = nullptr; }
@@ -24,7 +29,8 @@ public:
 
 private:
     void RenderNodeTree(SceneNode* node);
-    void RenderInspector(SceneNode* node, const std::filesystem::path& selectedAssetPath);
+    void RenderInspector(SceneNode* node, const std::filesystem::path& selectedAssetPath,
+                         khepri::NodeGraphEditorPanel* nodeGraphPanel);
     void RenderFileAssetInspector(const std::filesystem::path& assetPath);
 
     VulkanContext& m_context;

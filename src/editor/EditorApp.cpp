@@ -97,7 +97,12 @@ void EditorApp::ImportModelIntoScene(const std::string& path) {
         }
 
         if (m_activeDisplayMesh && m_nodeGraphEditorPanel) {
-            m_nodeGraphEditorPanel->SetImportedMesh(m_activeDisplayMesh);
+            const auto& children = m_rootNode->GetChildren();
+            if (!children.empty()) {
+                SceneNode* importedNode = children.back().get();
+                m_nodeGraphEditorPanel->SetTargetSceneNode(importedNode);
+                m_nodeGraphEditorPanel->SetImportedMesh(m_activeDisplayMesh);
+            }
         }
         m_camera.FocusOnTarget(glm::vec3(0.0f), 4.0f);
         LOG_INFO("Imported model into current scene: " + path);
@@ -495,52 +500,88 @@ void EditorApp::UpdateLightUBO() {
 }
 
 void EditorApp::CreateRenderPipeline() {
-    std::vector<VkDescriptorSetLayoutBinding> bindings(2);
-    bindings[0].binding = 0;
-    bindings[0].descriptorCount = 1;
-    bindings[0].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    bindings[0].pImmutableSamplers = nullptr;
-    bindings[0].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+    if (!m_textureDescriptorSetLayout) {
+        std::vector<VkDescriptorSetLayoutBinding> bindings(2);
+        bindings[0].binding = 0;
+        bindings[0].descriptorCount = 1;
+        bindings[0].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        bindings[0].pImmutableSamplers = nullptr;
+        bindings[0].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
 
-    bindings[1].binding = 1;
-    bindings[1].descriptorCount = 1;
-    bindings[1].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-    bindings[1].pImmutableSamplers = nullptr;
-    bindings[1].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+        bindings[1].binding = 1;
+        bindings[1].descriptorCount = 1;
+        bindings[1].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+        bindings[1].pImmutableSamplers = nullptr;
+        bindings[1].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
 
-    VkDescriptorSetLayoutCreateInfo descriptorLayoutInfo{};
-    descriptorLayoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-    descriptorLayoutInfo.bindingCount = static_cast<uint32_t>(bindings.size());
-    descriptorLayoutInfo.pBindings = bindings.data();
+        VkDescriptorSetLayoutCreateInfo descriptorLayoutInfo{};
+        descriptorLayoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+        descriptorLayoutInfo.bindingCount = static_cast<uint32_t>(bindings.size());
+        descriptorLayoutInfo.pBindings = bindings.data();
 
-    if (vkCreateDescriptorSetLayout(m_context->GetDevice(), &descriptorLayoutInfo, nullptr, &m_textureDescriptorSetLayout) != VK_SUCCESS) {
-        LOG_ERROR("Failed to create texture descriptor set layout!");
+        if (vkCreateDescriptorSetLayout(m_context->GetDevice(), &descriptorLayoutInfo, nullptr, &m_textureDescriptorSetLayout) != VK_SUCCESS) {
+            LOG_ERROR("Failed to create texture descriptor set layout!");
+        }
     }
 
-    m_lightUBOBuffer = std::make_unique<Buffer>(
-        *m_context,
-        sizeof(LightUBO),
-        VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
-        VMA_MEMORY_USAGE_AUTO,
-        VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT | VMA_ALLOCATION_CREATE_MAPPED_BIT
-    );
+    if (!m_lightUBOBuffer) {
+        m_lightUBOBuffer = std::make_unique<Buffer>(
+            *m_context,
+            sizeof(LightUBO),
+            VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
+            VMA_MEMORY_USAGE_AUTO,
+            VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT | VMA_ALLOCATION_CREATE_MAPPED_BIT
+        );
+    }
 
-    m_defaultWhiteTexture = Texture::CreateWhiteTexture(*m_context, m_textureDescriptorSetLayout, *m_descriptorAllocator, m_lightUBOBuffer->GetBuffer());
+    if (!m_defaultWhiteTexture) {
+        m_defaultWhiteTexture = Texture::CreateWhiteTexture(*m_context, m_textureDescriptorSetLayout, *m_descriptorAllocator, m_lightUBOBuffer->GetBuffer());
+    }
 
-    VkPushConstantRange pushConstant{};
-    pushConstant.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
-    pushConstant.offset = 0;
-    pushConstant.size = sizeof(PushConstants);
+    if (!m_pipelineLayout) {
+        VkPushConstantRange pushConstant{};
+        pushConstant.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
+        pushConstant.offset = 0;
+        pushConstant.size = sizeof(PushConstants);
 
-    VkPipelineLayoutCreateInfo layoutInfo{};
-    layoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-    layoutInfo.setLayoutCount = 1;
-    layoutInfo.pSetLayouts = &m_textureDescriptorSetLayout;
-    layoutInfo.pushConstantRangeCount = 1;
-    layoutInfo.pPushConstantRanges = &pushConstant;
+        VkPipelineLayoutCreateInfo layoutInfo{};
+        layoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+        layoutInfo.setLayoutCount = 1;
+        layoutInfo.pSetLayouts = &m_textureDescriptorSetLayout;
+        layoutInfo.pushConstantRangeCount = 1;
+        layoutInfo.pPushConstantRanges = &pushConstant;
 
-    if (vkCreatePipelineLayout(m_context->GetDevice(), &layoutInfo, nullptr, &m_pipelineLayout) != VK_SUCCESS) {
-        LOG_ERROR("Failed to create pipeline layout!");
+        if (vkCreatePipelineLayout(m_context->GetDevice(), &layoutInfo, nullptr, &m_pipelineLayout) != VK_SUCCESS) {
+            LOG_ERROR("Failed to create pipeline layout!");
+        }
+    }
+
+    if (!m_commandPool) {
+        VkCommandPoolCreateInfo poolInfo{};
+        poolInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
+        poolInfo.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
+        poolInfo.queueFamilyIndex = m_context->GetQueueFamilies().graphicsFamily.value();
+
+        vkCreateCommandPool(m_context->GetDevice(), &poolInfo, nullptr, &m_commandPool);
+
+        m_commandBuffers.resize(Swapchain::MAX_FRAMES_IN_FLIGHT);
+        VkCommandBufferAllocateInfo allocInfo{};
+        allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+        allocInfo.commandPool = m_commandPool;
+        allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+        allocInfo.commandBufferCount = static_cast<uint32_t>(m_commandBuffers.size());
+
+        vkAllocateCommandBuffers(m_context->GetDevice(), &allocInfo, m_commandBuffers.data());
+    }
+
+    // Destroy previous graphics & wireframe pipelines if rebuilding for MSAA
+    if (m_graphicsPipeline != VK_NULL_HANDLE) {
+        vkDestroyPipeline(m_context->GetDevice(), m_graphicsPipeline, nullptr);
+        m_graphicsPipeline = VK_NULL_HANDLE;
+    }
+    if (m_wireframePipeline != VK_NULL_HANDLE) {
+        vkDestroyPipeline(m_context->GetDevice(), m_wireframePipeline, nullptr);
+        m_wireframePipeline = VK_NULL_HANDLE;
     }
 
     std::vector<uint32_t> vCode = LoadSPIRV("shaders/compiled/mesh.vert.spv");
@@ -555,12 +596,16 @@ void EditorApp::CreateRenderPipeline() {
         { 2, 0, VK_FORMAT_R32G32_SFLOAT,    static_cast<uint32_t>(offsetof(Vertex, uv)) }
     };
 
+    VkSampleCountFlagBits msaaSamples = m_viewportPanel ? m_viewportPanel->GetMSAASamples() : VK_SAMPLE_COUNT_8_BIT;
+    m_currentPipelineMSAASamples = msaaSamples;
+
     PipelineBuilder builder;
     builder.SetShaders(vertModule, fragModule)
            .SetVertexInput(Vertex::GetBindingDescriptions(), attribs)
            .SetColorAttachmentFormat(VK_FORMAT_R8G8B8A8_UNORM)
            .SetDepthFormat(VK_FORMAT_D32_SFLOAT)
            .SetCullMode(VK_CULL_MODE_NONE, VK_FRONT_FACE_COUNTER_CLOCKWISE)
+           .SetMultisampling(msaaSamples, false)
            .EnableDepthTest(true, VK_COMPARE_OP_LESS_OR_EQUAL);
 
     m_graphicsPipeline = builder.Build(*m_context, m_pipelineLayout);
@@ -570,23 +615,6 @@ void EditorApp::CreateRenderPipeline() {
 
     vkDestroyShaderModule(m_context->GetDevice(), vertModule, nullptr);
     vkDestroyShaderModule(m_context->GetDevice(), fragModule, nullptr);
-
-    // Command Pool
-    VkCommandPoolCreateInfo poolInfo{};
-    poolInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
-    poolInfo.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
-    poolInfo.queueFamilyIndex = m_context->GetQueueFamilies().graphicsFamily.value();
-
-    vkCreateCommandPool(m_context->GetDevice(), &poolInfo, nullptr, &m_commandPool);
-
-    m_commandBuffers.resize(Swapchain::MAX_FRAMES_IN_FLIGHT);
-    VkCommandBufferAllocateInfo allocInfo{};
-    allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
-    allocInfo.commandPool = m_commandPool;
-    allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-    allocInfo.commandBufferCount = static_cast<uint32_t>(m_commandBuffers.size());
-
-    vkAllocateCommandBuffers(m_context->GetDevice(), &allocInfo, m_commandBuffers.data());
 }
 
 void EditorApp::BuildSampleScene() {
@@ -605,11 +633,15 @@ void EditorApp::BuildSampleScene() {
     // Default cube in scene so viewport isn't empty on startup
     auto cubeNode = std::make_unique<SceneNode>("Cube");
     cubeNode->mesh = MeshComponent::CreateCube(*m_context, 1.0f);
-    m_activeDisplayMesh = cubeNode->mesh;
-    m_rootNode->AddChild(std::move(cubeNode));
+    SceneNode* cubePtr = m_rootNode->AddChild(std::move(cubeNode));
 
     if (m_nodeGraphEditorPanel) {
-        m_nodeGraphEditorPanel->SetImportedMesh(m_activeDisplayMesh);
+        // Bind cube as target scene node and initialize graph
+        m_nodeGraphEditorPanel->SetTargetSceneNode(cubePtr);
+        auto graphMesh = m_nodeGraphEditorPanel->GetActiveOutputMesh();
+        m_activeDisplayMesh = graphMesh ? graphMesh : cubePtr->mesh;
+    } else {
+        m_activeDisplayMesh = cubePtr->mesh;
     }
 
     // Sample animation clip — NOT playing on startup (user must press Play)
@@ -708,22 +740,37 @@ void EditorApp::RenderViewportOffscreen(VkCommandBuffer cmd) {
     // Guard: don't attempt to render if the framebuffer image view is null
     if (m_viewportPanel->GetColorImageView() == VK_NULL_HANDLE) return;
 
+    // Rebuild pipelines if MSAA sample count changed
+    if (m_currentPipelineMSAASamples != m_viewportPanel->GetMSAASamples()) {
+        m_context->WaitIdle();
+        CreateRenderPipeline();
+    }
+
     m_viewportPanel->TransitionToColorAttachment(cmd);
+
+    VkSampleCountFlagBits msaaSamples = m_viewportPanel->GetMSAASamples();
 
     VkRenderingAttachmentInfo colorAttachment{};
     colorAttachment.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
-    colorAttachment.imageView = m_viewportPanel->GetColorImageView();
+    if (msaaSamples > VK_SAMPLE_COUNT_1_BIT) {
+        colorAttachment.imageView = m_viewportPanel->GetMSAAColorImageView();
+        colorAttachment.resolveMode = VK_RESOLVE_MODE_AVERAGE_BIT;
+        colorAttachment.resolveImageView = m_viewportPanel->GetColorImageView();
+        colorAttachment.resolveImageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+    } else {
+        colorAttachment.imageView = m_viewportPanel->GetColorImageView();
+    }
     colorAttachment.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
     colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-    colorAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+    colorAttachment.storeOp = (msaaSamples > VK_SAMPLE_COUNT_1_BIT) ? VK_ATTACHMENT_STORE_OP_DONT_CARE : VK_ATTACHMENT_STORE_OP_STORE;
     colorAttachment.clearValue.color = { 0.12f, 0.14f, 0.18f, 1.0f };
 
     VkRenderingAttachmentInfo depthAttachment{};
     depthAttachment.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
-    depthAttachment.imageView = m_viewportPanel->GetDepthImageView();
+    depthAttachment.imageView = (msaaSamples > VK_SAMPLE_COUNT_1_BIT) ? m_viewportPanel->GetMSAADepthImageView() : m_viewportPanel->GetDepthImageView();
     depthAttachment.imageLayout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL;
     depthAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-    depthAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+    depthAttachment.storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
     depthAttachment.clearValue.depthStencil = { 1.0f, 0 };
 
     VkRenderingInfo renderingInfo{};
@@ -871,7 +918,8 @@ void EditorApp::Run() {
         }
         if (m_showSceneTree && m_sceneTreePanel) {
             const auto& selectedAsset = m_assetManagerPanel ? m_assetManagerPanel->GetSelectedPath() : std::filesystem::path();
-            m_sceneTreePanel->RenderUI(m_rootNode.get(), m_activeDisplayMesh, selectedAsset);
+            m_sceneTreePanel->RenderUI(m_rootNode.get(), m_activeDisplayMesh, selectedAsset,
+                                       m_nodeGraphEditorPanel.get());
         }
         if (m_showTimeline && m_timelinePanel) {
             m_timelinePanel->RenderUI(m_timeline, m_sceneTreePanel->GetSelectedNode(), m_rootNode.get());
@@ -880,10 +928,14 @@ void EditorApp::Run() {
             m_vulkanInspectorPanel->RenderUI(*m_swapchain);
         }
         if (m_showNodeGraph && m_nodeGraphEditorPanel) {
+            SceneNode* selected = m_sceneTreePanel ? m_sceneTreePanel->GetSelectedNode() : nullptr;
+            if (selected && m_nodeGraphEditorPanel->GetTargetSceneNode() != selected) {
+                m_nodeGraphEditorPanel->SetTargetSceneNode(selected);
+            }
+
             m_nodeGraphEditorPanel->RenderUI(m_activeDisplayMesh);
             
-            // Synchronize active graph output mesh to selected SceneNode
-            SceneNode* selected = m_sceneTreePanel ? m_sceneTreePanel->GetSelectedNode() : nullptr;
+            // Synchronize active graph output mesh to target SceneNode
             if (selected && selected->mesh && m_activeDisplayMesh) {
                 selected->mesh = m_activeDisplayMesh;
             }

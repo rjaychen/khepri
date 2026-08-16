@@ -72,6 +72,7 @@ private:
     VkPipelineLayout m_pipelineLayout = VK_NULL_HANDLE;
     VkPipeline m_graphicsPipeline = VK_NULL_HANDLE;
     VkPipeline m_wireframePipeline = VK_NULL_HANDLE;
+    VkSampleCountFlagBits m_currentPipelineMSAASamples = VK_SAMPLE_COUNT_1_BIT;
 
     // Command Buffers
     VkCommandPool m_commandPool = VK_NULL_HANDLE;

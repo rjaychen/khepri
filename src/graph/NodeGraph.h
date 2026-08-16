@@ -42,6 +42,14 @@ struct GraphPin {
     uint32_t connectedPinId{0};
 };
 
+struct PinRef {
+    uint32_t nodeId{0};
+    PinDirection direction{PinDirection::Input};
+    size_t pinIndex{0};
+};
+
+class NodeGraph;
+
 class GraphNode {
 public:
     inline static bool s_enableGraphLogging{false};
@@ -59,8 +67,11 @@ public:
     [[nodiscard]] NodeDomain GetDomain() const noexcept { return m_domain; }
 
     [[nodiscard]] bool IsDirty() const noexcept { return m_isDirty; }
-    void MarkDirty() noexcept { m_isDirty = true; }
+    void MarkDirty() noexcept;
     void ClearDirty() noexcept { m_isDirty = false; }
+
+    void SetGraph(NodeGraph* graph) noexcept { m_graph = graph; }
+    [[nodiscard]] NodeGraph* GetGraph() const noexcept { return m_graph; }
 
     [[nodiscard]] std::vector<GraphPin>& GetInputs() noexcept { return m_inputs; }
     [[nodiscard]] const std::vector<GraphPin>& GetInputs() const noexcept { return m_inputs; }
@@ -72,6 +83,12 @@ public:
     [[nodiscard]] GraphPin* FindOutput(const std::string& name) noexcept;
     [[nodiscard]] const GraphPin* FindOutput(const std::string& name) const noexcept;
 
+    // Returns the primary geometry output of this node, or nullptr if the node
+    // does not produce geometry (e.g. FloatNode, Vector3Node).
+    // Override in any node that has a MeshComponent output rather than duplicating
+    // the same non-virtual getter pattern in every concrete subclass.
+    [[nodiscard]] virtual std::shared_ptr<MeshComponent> GetOutputMesh() const noexcept { return nullptr; }
+
     virtual void Evaluate() = 0;
 
 protected:
@@ -82,6 +99,7 @@ protected:
     std::string m_name;
     NodeDomain m_domain;
     bool m_isDirty{true};
+    NodeGraph* m_graph{nullptr};
     std::vector<GraphPin> m_inputs;
     std::vector<GraphPin> m_outputs;
     static uint32_t s_nextPinId;
@@ -101,6 +119,8 @@ public:
     std::shared_ptr<T> CreateNode(Args&&... args) {
         const uint32_t id = ++m_nextNodeId;
         auto node = std::make_shared<T>(id, std::forward<Args>(args)...);
+        node->SetGraph(this);
+        RegisterNodePins(*node);
         m_nodes[id] = node;
         return node;
     }
@@ -112,6 +132,12 @@ public:
     void Evaluate();
     void MarkNodeDirty(uint32_t nodeId);
 
+    [[nodiscard]] GraphPin* FindPin(uint32_t pinId) noexcept;
+    [[nodiscard]] const GraphPin* FindPin(uint32_t pinId) const noexcept;
+    [[nodiscard]] bool HasPath(uint32_t startNodeId, uint32_t targetNodeId) const noexcept;
+
+    void RegisterNodePins(const GraphNode& node);
+
     [[nodiscard]] const std::unordered_map<uint32_t, std::shared_ptr<GraphNode>>& GetNodes() const noexcept { return m_nodes; }
     [[nodiscard]] std::shared_ptr<GraphNode> GetNode(uint32_t id) const noexcept;
 
@@ -120,7 +146,8 @@ public:
 private:
     uint32_t m_nextNodeId{0};
     std::unordered_map<uint32_t, std::shared_ptr<GraphNode>> m_nodes;
-    std::unordered_map<uint32_t, GraphPin*> m_pinMap;
+    std::unordered_map<uint32_t, PinRef> m_pinMap;
 };
 
 } // namespace khepri::graph
+

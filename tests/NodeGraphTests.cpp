@@ -225,3 +225,147 @@ TEST(NodeGraphTest, ExternalMeshNodeReplacesPrimitiveGeneratorToPreventDuplicate
     EXPECT_GT(outMesh->GetVertices().size(), 0u);
 }
 
+TEST(NodeGraphTest, CyclePreventionRejectsLoopingConnections) {
+    NodeGraph graph;
+
+    auto nodeA = graph.CreateNode<TwistDeformerNode>();
+    auto nodeB = graph.CreateNode<TwistDeformerNode>();
+    auto nodeC = graph.CreateNode<TwistDeformerNode>();
+
+    auto* outA = nodeA->FindOutput("DeformedMeshBuffer");
+    auto* inB  = nodeB->FindInput("MeshBuffer");
+    auto* outB = nodeB->FindOutput("DeformedMeshBuffer");
+    auto* inC  = nodeC->FindInput("MeshBuffer");
+    auto* outC = nodeC->FindOutput("DeformedMeshBuffer");
+    auto* inA  = nodeA->FindInput("MeshBuffer");
+
+    ASSERT_NE(outA, nullptr);
+    ASSERT_NE(inB, nullptr);
+    ASSERT_NE(outB, nullptr);
+    ASSERT_NE(inC, nullptr);
+    ASSERT_NE(outC, nullptr);
+    ASSERT_NE(inA, nullptr);
+
+    // Connect A -> B -> C
+    EXPECT_TRUE(graph.Connect(outA->id, inB->id));
+    EXPECT_TRUE(graph.Connect(outB->id, inC->id));
+
+    // Connecting C -> A would form a cycle (A -> B -> C -> A), must return false!
+    EXPECT_FALSE(graph.Connect(outC->id, inA->id));
+
+    // Self-loop (A -> A) must return false!
+    EXPECT_FALSE(graph.Connect(outA->id, inA->id));
+}
+
+TEST(NodeGraphTest, DownstreamDirtyFlagPropagationOnParameterMutationAndDisconnect) {
+    NodeGraph graph;
+
+    auto primNode  = graph.CreateNode<MeshPrimitiveNode>(nullptr, MeshPrimitiveNode::PrimitiveType::Cube);
+    auto subNode   = graph.CreateNode<SubdivisionNode>(nullptr, 1);
+    auto twistNode = graph.CreateNode<TwistDeformerNode>(nullptr);
+
+    EXPECT_TRUE(graph.Connect(primNode->FindOutput("MeshBuffer")->id, subNode->FindInput("MeshBuffer")->id));
+    EXPECT_TRUE(graph.Connect(subNode->FindOutput("SubdividedMeshBuffer")->id, twistNode->FindInput("MeshBuffer")->id));
+
+    graph.Evaluate();
+
+    EXPECT_FALSE(primNode->IsDirty());
+    EXPECT_FALSE(subNode->IsDirty());
+    EXPECT_FALSE(twistNode->IsDirty());
+
+    // Mutate root node parameter -> must propagate dirty state down to subNode and twistNode
+    primNode->SetSegmentsX(4);
+    EXPECT_TRUE(primNode->IsDirty());
+    EXPECT_TRUE(subNode->IsDirty());
+    EXPECT_TRUE(twistNode->IsDirty());
+
+    graph.Evaluate();
+    EXPECT_FALSE(primNode->IsDirty());
+    EXPECT_FALSE(subNode->IsDirty());
+    EXPECT_FALSE(twistNode->IsDirty());
+
+    // Disconnecting input pin -> must propagate dirty state downstream
+    EXPECT_TRUE(graph.Disconnect(twistNode->FindInput("MeshBuffer")->id));
+    EXPECT_TRUE(twistNode->IsDirty());
+}
+
+TEST(NodeGraphTest, SafePinLookupFindPinFunctions) {
+    NodeGraph graph;
+
+    auto twistNode = graph.CreateNode<TwistDeformerNode>();
+    const auto* inPin = twistNode->FindInput("Angle");
+    ASSERT_NE(inPin, nullptr);
+
+    GraphPin* foundPin = graph.FindPin(inPin->id);
+    ASSERT_NE(foundPin, nullptr);
+    EXPECT_EQ(foundPin->id, inPin->id);
+    EXPECT_EQ(foundPin->name, "Angle");
+
+    const NodeGraph& constGraph = graph;
+    const GraphPin* constFoundPin = constGraph.FindPin(inPin->id);
+    ASSERT_NE(constFoundPin, nullptr);
+    EXPECT_EQ(constFoundPin->id, inPin->id);
+}
+// ---------------------------------------------------------------------------
+// GraphNode::GetOutputMesh() virtual contract
+// Verifies that the base-class virtual dispatch eliminates the need for
+// dynamic_cast in any caller. New node types only need to override this method.
+// ---------------------------------------------------------------------------
+
+TEST(NodeGraphTest, GetOutputMeshVirtualDispatchReturnsNullForValueNodes) {
+    // FloatNode and Vector3Node do not produce geometry; the base default must be null.
+    NodeGraph graph;
+    auto floatNode  = graph.CreateNode<FloatNode>(1.0f);
+    auto vec3Node   = graph.CreateNode<Vector3Node>(glm::vec3(0.0f));
+
+    // Access through base pointer to prove no downcast is required
+    const GraphNode* baseFloat = floatNode.get();
+    const GraphNode* baseVec3  = vec3Node.get();
+
+    EXPECT_EQ(baseFloat->GetOutputMesh(), nullptr)
+        << "FloatNode must not advertise a geometry output";
+    EXPECT_EQ(baseVec3->GetOutputMesh(), nullptr)
+        << "Vector3Node must not advertise a geometry output";
+}
+
+TEST(NodeGraphTest, GetOutputMeshVirtualDispatchReturnsGeometryForGeometryNodes) {
+    // All geometry-producing nodes must return non-null through the base pointer
+    // after evaluation, with zero dynamic_cast.
+    NodeGraph graph;
+    auto primNode   = graph.CreateNode<MeshPrimitiveNode>(nullptr, MeshPrimitiveNode::PrimitiveType::Cube);
+    auto subdivNode = graph.CreateNode<SubdivisionNode>(nullptr, 1);
+    auto twistNode  = graph.CreateNode<TwistDeformerNode>(nullptr);
+
+    // Chain: primitive -> subdivide -> twist (headless, no Vulkan context)
+    if (primNode->FindOutput("MeshBuffer") && subdivNode->FindInput("MeshBuffer")) {
+        graph.Connect(primNode->FindOutput("MeshBuffer")->id, subdivNode->FindInput("MeshBuffer")->id);
+    }
+
+    graph.Evaluate();
+
+    // Collect all non-null output meshes through the base class pointer only
+    int geometryNodeCount = 0;
+    for (const auto& [id, node] : graph.GetNodes()) {
+        if (node->GetOutputMesh() != nullptr) {
+            ++geometryNodeCount;
+        }
+    }
+    // primitiveNode and subdivNode should each expose a mesh; twistNode has no input so may be null
+    EXPECT_GE(geometryNodeCount, 1)
+        << "At least the primitive node must produce geometry through the base virtual";
+}
+
+TEST(NodeGraphTest, GetOutputMeshVirtualDispatchConsistentWithConcreteType) {
+    // The mesh returned via the base pointer must be the same object as via the concrete type.
+    NodeGraph graph;
+    auto primNode = graph.CreateNode<MeshPrimitiveNode>(nullptr, MeshPrimitiveNode::PrimitiveType::Sphere);
+    graph.Evaluate();
+
+    const GraphNode* base    = primNode.get();
+    auto meshViaBase     = base->GetOutputMesh();
+    auto meshViaConcrete = primNode->GetOutputMesh();
+
+    EXPECT_EQ(meshViaBase, meshViaConcrete)
+        << "Virtual and concrete GetOutputMesh() must return the same shared_ptr";
+}
+

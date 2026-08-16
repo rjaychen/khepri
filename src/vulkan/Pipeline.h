@@ -16,6 +16,7 @@ public:
     PipelineBuilder& SetPolygonMode(VkPolygonMode mode);
     PipelineBuilder& SetCullMode(VkCullModeFlags cullMode, VkFrontFace frontFace);
     PipelineBuilder& SetMultisamplingNone();
+    PipelineBuilder& SetMultisampling(VkSampleCountFlagBits samples, bool sampleShading = false);
     PipelineBuilder& DisableBlending();
     PipelineBuilder& SetColorAttachmentFormat(VkFormat format);
     PipelineBuilder& SetDepthFormat(VkFormat format);

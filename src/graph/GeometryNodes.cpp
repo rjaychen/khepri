@@ -17,6 +17,7 @@ void MeshPrimitiveNode::Evaluate() {
     case PrimitiveType::Sphere:
         m_outputMesh = MeshComponent::CreateSphere(*m_context, 1.2f, 32, 16);
         break;
+   // Generates primitive mesh buffers (Cube, Sphere, Cylinder, Plane) - Procedural Geometry Nodes:
     case PrimitiveType::Cylinder:
         m_outputMesh = MeshComponent::CreateCylinder(*m_context, 0.8f, 2.0f, 32);
         break;
@@ -168,6 +169,32 @@ void CSGBooleanNode::Evaluate() {
     m_outputMesh = MeshBoolean::PerformBoolean(*m_context, *meshA, *meshB, op);
     if (s_enableGraphLogging) {
         LOG_INFO("Evaluated CSGBooleanNode " + std::to_string(m_id));
+    }
+}
+
+FloatNode::FloatNode(uint32_t id, float initialValue) noexcept
+    : GraphNode(id, "Float Value", NodeDomain::Geometry), m_value(initialValue) {
+    AddOutput("Value", PinType::Float);
+}
+
+void FloatNode::Evaluate() {
+    auto* outPin = FindOutput("Value");
+    if (outPin) outPin->value = m_value;
+    if (s_enableGraphLogging) {
+        LOG_INFO("Evaluated FloatNode " + std::to_string(m_id) + " value=" + std::to_string(m_value));
+    }
+}
+
+Vector3Node::Vector3Node(uint32_t id, const glm::vec3& initialValue) noexcept
+    : GraphNode(id, "Vector3 Value", NodeDomain::Geometry), m_value(initialValue) {
+    AddOutput("Value", PinType::Vector3);
+}
+
+void Vector3Node::Evaluate() {
+    auto* outPin = FindOutput("Value");
+    if (outPin) outPin->value = m_value;
+    if (s_enableGraphLogging) {
+        LOG_INFO("Evaluated Vector3Node " + std::to_string(m_id));
     }
 }
 

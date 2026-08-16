@@ -171,6 +171,7 @@ void VulkanContext::SetupDebugMessenger() {
 }
 
 void VulkanContext::CreateSurface(GLFWwindow* window) {
+    if (!window) return;
     if (glfwCreateWindowSurface(m_instance, window, nullptr, &m_surface) != VK_SUCCESS) {
         LOG_ERROR("Failed to create window surface");
         throw std::runtime_error("Failed to create window surface");
@@ -229,7 +230,11 @@ QueueFamilyIndices VulkanContext::FindQueueFamilies(VkPhysicalDevice device) {
         }
 
         VkBool32 presentSupport = false;
-        vkGetPhysicalDeviceSurfaceSupportKHR(device, i, m_surface, &presentSupport);
+        if (m_surface != VK_NULL_HANDLE) {
+            vkGetPhysicalDeviceSurfaceSupportKHR(device, i, m_surface, &presentSupport);
+        } else {
+            presentSupport = (queueFamily.queueFlags & VK_QUEUE_GRAPHICS_BIT) ? VK_TRUE : VK_FALSE;
+        }
         if (presentSupport) {
             indices.presentFamily = i;
         }
