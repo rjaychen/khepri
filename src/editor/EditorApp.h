@@ -47,6 +47,7 @@ public:
 
 private:
     void InitImGui();
+    void InitRenderResources();
     void CreateRenderPipeline();
     void BuildSampleScene();
     void RecordCommandBuffer(VkCommandBuffer cmd, uint32_t imageIndex);

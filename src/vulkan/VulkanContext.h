@@ -8,16 +8,10 @@
 #include <optional>
 #include <memory>
 #include <functional>
+#include "PhysicalDevice.h"
 
-struct QueueFamilyIndices {
-    std::optional<uint32_t> graphicsFamily;
-    std::optional<uint32_t> presentFamily;
-    std::optional<uint32_t> computeFamily;
-
-    bool isComplete() const {
-        return graphicsFamily.has_value() && presentFamily.has_value() && computeFamily.has_value();
-    }
-};
+using QueueFamilyIndices = Khepri::QueueFamilyIndices;
+using VulkanPhysicalDevice = Khepri::VulkanPhysicalDevice;
 
 class VulkanContext {
 public:
@@ -28,18 +22,21 @@ public:
     VulkanContext& operator=(const VulkanContext&) = delete;
 
     VkInstance GetInstance() const { return m_instance; }
-    VkPhysicalDevice GetPhysicalDevice() const { return m_physicalDevice; }
+    VkPhysicalDevice GetPhysicalDevice() const { return m_physicalDevice.GetHandle(); }
+    const Khepri::VulkanPhysicalDevice& GetPhysicalDeviceInfo() const { return m_physicalDevice; }
+    const std::vector<Khepri::VulkanPhysicalDevice>& GetAvailablePhysicalDevices() const { return m_availableDevices; }
+
     VkDevice GetDevice() const { return m_device; }
     VkSurfaceKHR GetSurface() const { return m_surface; }
     VkQueue GetGraphicsQueue() const { return m_graphicsQueue; }
     VkQueue GetPresentQueue() const { return m_presentQueue; }
     VkQueue GetComputeQueue() const { return m_computeQueue; }
-    QueueFamilyIndices GetQueueFamilies() const { return m_queueIndices; }
+    Khepri::QueueFamilyIndices GetQueueFamilies() const { return m_physicalDevice.GetQueueFamilies(); }
     VmaAllocator GetAllocator() const { return m_allocator; }
-    VkPhysicalDeviceProperties GetDeviceProperties() const { return m_deviceProperties; }
+    VkPhysicalDeviceProperties GetDeviceProperties() const { return m_physicalDevice.GetProperties(); }
     VkSampleCountFlagBits GetMaxUsableSampleCount() const {
-        VkSampleCountFlags counts = m_deviceProperties.limits.framebufferColorSampleCounts &
-                                    m_deviceProperties.limits.framebufferDepthSampleCounts;
+        VkSampleCountFlags counts = m_physicalDevice.GetProperties().limits.framebufferColorSampleCounts &
+                                    m_physicalDevice.GetProperties().limits.framebufferDepthSampleCounts;
         if (counts & VK_SAMPLE_COUNT_8_BIT) return VK_SAMPLE_COUNT_8_BIT;
         if (counts & VK_SAMPLE_COUNT_4_BIT) return VK_SAMPLE_COUNT_4_BIT;
         if (counts & VK_SAMPLE_COUNT_2_BIT) return VK_SAMPLE_COUNT_2_BIT;
@@ -48,6 +45,19 @@ public:
 
     void WaitIdle() const { vkDeviceWaitIdle(m_device); }
     void ImmediateSubmit(std::function<void(VkCommandBuffer cmd)>&& action) const;
+
+    [[nodiscard]] VkCommandPool CreateCommandPool(
+        VkCommandPoolCreateFlags flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT,
+        std::optional<uint32_t> queueFamilyIndex = std::nullopt) const;
+
+    [[nodiscard]] std::vector<VkCommandBuffer> AllocateCommandBuffers(
+        VkCommandPool commandPool,
+        uint32_t count,
+        VkCommandBufferLevel level = VK_COMMAND_BUFFER_LEVEL_PRIMARY) const;
+
+    [[nodiscard]] VkCommandBuffer AllocateCommandBuffer(
+        VkCommandPool commandPool,
+        VkCommandBufferLevel level = VK_COMMAND_BUFFER_LEVEL_PRIMARY) const;
 
 private:
     void InitVolk();
@@ -58,22 +68,21 @@ private:
     void CreateLogicalDevice();
     void CreateAllocator();
 
-    QueueFamilyIndices FindQueueFamilies(VkPhysicalDevice device);
-    bool CheckDeviceExtensionSupport(VkPhysicalDevice device);
     bool CheckValidationLayerSupport();
     bool CheckInstanceExtensionSupport(const char* extName);
 
     VkInstance m_instance = VK_NULL_HANDLE;
     VkDebugUtilsMessengerEXT m_debugMessenger = VK_NULL_HANDLE;
     VkSurfaceKHR m_surface = VK_NULL_HANDLE;
-    VkPhysicalDevice m_physicalDevice = VK_NULL_HANDLE;
-    VkPhysicalDeviceProperties m_deviceProperties{};
+
+    Khepri::VulkanPhysicalDevice m_physicalDevice;
+    std::vector<Khepri::VulkanPhysicalDevice> m_availableDevices;
+
     VkDevice m_device = VK_NULL_HANDLE;
 
     VkQueue m_graphicsQueue = VK_NULL_HANDLE;
     VkQueue m_presentQueue = VK_NULL_HANDLE;
     VkQueue m_computeQueue = VK_NULL_HANDLE;
-    QueueFamilyIndices m_queueIndices;
 
     VmaAllocator m_allocator = VK_NULL_HANDLE;
 

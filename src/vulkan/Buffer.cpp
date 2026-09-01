@@ -6,7 +6,7 @@
 Buffer::Buffer(VulkanContext& context, VkDeviceSize size, VkBufferUsageFlags usage, VmaMemoryUsage memoryUsage, VmaAllocationCreateFlags flags)
     : m_context(&context), m_size(size) {
 
-    VkDeviceSize allocSize = std::max(size, static_cast<VkDeviceSize>(16));
+    const VkDeviceSize allocSize = std::max(size, static_cast<VkDeviceSize>(16));
 
     VkBufferCreateInfo bufferInfo{};
     bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
@@ -15,8 +15,8 @@ Buffer::Buffer(VulkanContext& context, VkDeviceSize size, VkBufferUsageFlags usa
     bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 
     VmaAllocationCreateInfo allocInfo{};
-    allocInfo.usage = memoryUsage;
     allocInfo.flags = flags;
+    allocInfo.usage = memoryUsage;
 
     if (vmaCreateBuffer(context.GetAllocator(), &bufferInfo, &allocInfo, &m_buffer, &m_allocation, &m_allocationInfo) != VK_SUCCESS) {
         LOG_ERROR("Failed to create VMA Buffer of size " + std::to_string(size));
@@ -100,22 +100,9 @@ void Buffer::CopyToBuffer(const void* data, VkDeviceSize size, VkDeviceSize offs
 
 void Buffer::CopyBuffer(VulkanContext& context, VkBuffer srcBuffer, VkBuffer dstBuffer, VkDeviceSize size) {
     if (!srcBuffer || !dstBuffer || size == 0) return;
-    VkCommandPoolCreateInfo poolInfo{};
-    poolInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
-    poolInfo.flags = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT;
-    poolInfo.queueFamilyIndex = context.GetQueueFamilies().graphicsFamily.value();
 
-    VkCommandPool commandPool;
-    vkCreateCommandPool(context.GetDevice(), &poolInfo, nullptr, &commandPool);
-
-    VkCommandBufferAllocateInfo allocInfo{};
-    allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
-    allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-    allocInfo.commandPool = commandPool;
-    allocInfo.commandBufferCount = 1;
-
-    VkCommandBuffer commandBuffer;
-    vkAllocateCommandBuffers(context.GetDevice(), &allocInfo, &commandBuffer);
+    const VkCommandPool commandPool = context.CreateCommandPool(VK_COMMAND_POOL_CREATE_TRANSIENT_BIT);
+    const VkCommandBuffer commandBuffer = context.AllocateCommandBuffer(commandPool);
 
     VkCommandBufferBeginInfo beginInfo{};
     beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;

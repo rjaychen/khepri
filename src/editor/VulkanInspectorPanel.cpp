@@ -8,11 +8,36 @@ void VulkanInspectorPanel::RenderUI(const Swapchain& swapchain) {
     ImGui::Begin("Vulkan Educational Inspector");
 
     if (ImGui::CollapsingHeader("Physical Device & Driver", ImGuiTreeNodeFlags_DefaultOpen)) {
-        auto props = m_context.GetDeviceProperties();
-        ImGui::Text("GPU Name: %s", props.deviceName);
+        const auto& activeGPU = m_context.GetPhysicalDeviceInfo();
+        auto props = activeGPU.GetProperties();
+
+        const char* typeStr = "Unknown";
+        switch (props.deviceType) {
+            case VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU: typeStr = "Discrete GPU"; break;
+            case VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU: typeStr = "Integrated GPU"; break;
+            case VK_PHYSICAL_DEVICE_TYPE_VIRTUAL_GPU: typeStr = "Virtual GPU"; break;
+            case VK_PHYSICAL_DEVICE_TYPE_CPU: typeStr = "CPU"; break;
+            default: break;
+        }
+
+        ImGui::Text("Active GPU: %s (%s)", props.deviceName, typeStr);
+        ImGui::Text("Dedicated VRAM: %.2f GB", activeGPU.GetDedicatedVRAMGigabytes());
         ImGui::Text("API Version: %d.%d.%d", VK_VERSION_MAJOR(props.apiVersion), VK_VERSION_MINOR(props.apiVersion), VK_VERSION_PATCH(props.apiVersion));
         ImGui::Text("Driver Version: %d", props.driverVersion);
         ImGui::Text("Vendor ID: 0x%X | Device ID: 0x%X", props.vendorID, props.deviceID);
+
+        const auto& allDevices = m_context.GetAvailablePhysicalDevices();
+        if (allDevices.size() > 1) {
+            ImGui::Separator();
+            ImGui::Text("Detected GPUs in System (%zu):", allDevices.size());
+            for (size_t i = 0; i < allDevices.size(); ++i) {
+                ImGui::BulletText("[%zu] %s (%.2f GB VRAM)%s",
+                                  i,
+                                  allDevices[i].GetDeviceName().c_str(),
+                                  allDevices[i].GetDedicatedVRAMGigabytes(),
+                                  (allDevices[i].GetHandle() == activeGPU.GetHandle()) ? " [ACTIVE]" : "");
+            }
+        }
     }
 
     if (ImGui::CollapsingHeader("Swapchain & Dynamic Rendering State", ImGuiTreeNodeFlags_DefaultOpen)) {

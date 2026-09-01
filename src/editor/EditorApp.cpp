@@ -3,9 +3,11 @@
 #include "../core/FileDialog.h"
 #include "../mesh/GLTFImporter.h"
 #include "../assets/AssetManager.h"
+#include "../vulkan/VulkanUtils.h"
 #include <glm/gtc/matrix_transform.hpp>
 #include <chrono>
 #include <fstream>
+#include <array>
 #include <imgui_internal.h>
 
 void EditorApp::ApplyDockLayout(ImGuiID dockspaceID) {
@@ -340,6 +342,7 @@ EditorApp::EditorApp()
     m_descriptorAllocator = std::make_unique<DescriptorAllocator>(*m_context, 100);
 
     InitImGui();
+    InitRenderResources();
     CreateRenderPipeline();
 
     // Init Viewport & Editor Panels
@@ -499,19 +502,18 @@ void EditorApp::UpdateLightUBO() {
     m_lightUBOBuffer->CopyToBuffer(&ubo, sizeof(LightUBO));
 }
 
-void EditorApp::CreateRenderPipeline() {
+void EditorApp::InitRenderResources() {
+    // 1. Texture Descriptor Set Layout
     if (!m_textureDescriptorSetLayout) {
         std::vector<VkDescriptorSetLayoutBinding> bindings(2);
         bindings[0].binding = 0;
         bindings[0].descriptorCount = 1;
         bindings[0].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-        bindings[0].pImmutableSamplers = nullptr;
         bindings[0].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
 
         bindings[1].binding = 1;
         bindings[1].descriptorCount = 1;
         bindings[1].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-        bindings[1].pImmutableSamplers = nullptr;
         bindings[1].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
 
         VkDescriptorSetLayoutCreateInfo descriptorLayoutInfo{};
@@ -519,11 +521,11 @@ void EditorApp::CreateRenderPipeline() {
         descriptorLayoutInfo.bindingCount = static_cast<uint32_t>(bindings.size());
         descriptorLayoutInfo.pBindings = bindings.data();
 
-        if (vkCreateDescriptorSetLayout(m_context->GetDevice(), &descriptorLayoutInfo, nullptr, &m_textureDescriptorSetLayout) != VK_SUCCESS) {
-            LOG_ERROR("Failed to create texture descriptor set layout!");
-        }
+        const VkResult res = vkCreateDescriptorSetLayout(m_context->GetDevice(), &descriptorLayoutInfo, nullptr, &m_textureDescriptorSetLayout);
+        CHECK_VK_RESULT(res, "Failed to create texture descriptor set layout");
     }
 
+    // 2. Light UBO Buffer
     if (!m_lightUBOBuffer) {
         m_lightUBOBuffer = std::make_unique<Buffer>(
             *m_context,
@@ -534,10 +536,12 @@ void EditorApp::CreateRenderPipeline() {
         );
     }
 
+    // 3. Default White Texture
     if (!m_defaultWhiteTexture) {
         m_defaultWhiteTexture = Texture::CreateWhiteTexture(*m_context, m_textureDescriptorSetLayout, *m_descriptorAllocator, m_lightUBOBuffer->GetBuffer());
     }
 
+    // 4. Pipeline Layout
     if (!m_pipelineLayout) {
         VkPushConstantRange pushConstant{};
         pushConstant.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
@@ -551,29 +555,18 @@ void EditorApp::CreateRenderPipeline() {
         layoutInfo.pushConstantRangeCount = 1;
         layoutInfo.pPushConstantRanges = &pushConstant;
 
-        if (vkCreatePipelineLayout(m_context->GetDevice(), &layoutInfo, nullptr, &m_pipelineLayout) != VK_SUCCESS) {
-            LOG_ERROR("Failed to create pipeline layout!");
-        }
+        const VkResult res = vkCreatePipelineLayout(m_context->GetDevice(), &layoutInfo, nullptr, &m_pipelineLayout);
+        CHECK_VK_RESULT(res, "Failed to create pipeline layout");
     }
 
+    // 5. Command Pool & Command Buffers
     if (!m_commandPool) {
-        VkCommandPoolCreateInfo poolInfo{};
-        poolInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
-        poolInfo.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
-        poolInfo.queueFamilyIndex = m_context->GetQueueFamilies().graphicsFamily.value();
-
-        vkCreateCommandPool(m_context->GetDevice(), &poolInfo, nullptr, &m_commandPool);
-
-        m_commandBuffers.resize(Swapchain::MAX_FRAMES_IN_FLIGHT);
-        VkCommandBufferAllocateInfo allocInfo{};
-        allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
-        allocInfo.commandPool = m_commandPool;
-        allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-        allocInfo.commandBufferCount = static_cast<uint32_t>(m_commandBuffers.size());
-
-        vkAllocateCommandBuffers(m_context->GetDevice(), &allocInfo, m_commandBuffers.data());
+        m_commandPool = m_context->CreateCommandPool(VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT);
+        m_commandBuffers = m_context->AllocateCommandBuffers(m_commandPool, Swapchain::MAX_FRAMES_IN_FLIGHT);
     }
+}
 
+void EditorApp::CreateRenderPipeline() {
     // Destroy previous graphics & wireframe pipelines if rebuilding for MSAA
     if (m_graphicsPipeline != VK_NULL_HANDLE) {
         vkDestroyPipeline(m_context->GetDevice(), m_graphicsPipeline, nullptr);
@@ -590,13 +583,13 @@ void EditorApp::CreateRenderPipeline() {
     VkShaderModule vertModule = PipelineBuilder::CreateShaderModule(*m_context, vCode);
     VkShaderModule fragModule = PipelineBuilder::CreateShaderModule(*m_context, fCode);
 
-    std::vector<VkVertexInputAttributeDescription> attribs = {
-        { 0, 0, VK_FORMAT_R32G32B32_SFLOAT, static_cast<uint32_t>(offsetof(Vertex, position)) },
-        { 1, 0, VK_FORMAT_R32G32B32_SFLOAT, static_cast<uint32_t>(offsetof(Vertex, normal)) },
-        { 2, 0, VK_FORMAT_R32G32_SFLOAT,    static_cast<uint32_t>(offsetof(Vertex, uv)) }
+    const std::vector<VkVertexInputAttributeDescription> attribs = {
+        { .location = 0, .binding = 0, .format = VK_FORMAT_R32G32B32_SFLOAT, .offset = static_cast<uint32_t>(offsetof(Vertex, position)) },
+        { .location = 1, .binding = 0, .format = VK_FORMAT_R32G32B32_SFLOAT, .offset = static_cast<uint32_t>(offsetof(Vertex, normal)) },
+        { .location = 2, .binding = 0, .format = VK_FORMAT_R32G32_SFLOAT,    .offset = static_cast<uint32_t>(offsetof(Vertex, uv)) }
     };
 
-    VkSampleCountFlagBits msaaSamples = m_viewportPanel ? m_viewportPanel->GetMSAASamples() : VK_SAMPLE_COUNT_8_BIT;
+    const VkSampleCountFlagBits msaaSamples = m_viewportPanel ? m_viewportPanel->GetMSAASamples() : VK_SAMPLE_COUNT_8_BIT;
     m_currentPipelineMSAASamples = msaaSamples;
 
     PipelineBuilder builder;

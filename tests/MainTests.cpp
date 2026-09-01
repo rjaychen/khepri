@@ -232,3 +232,126 @@ TEST(AnimationTimelineTest, KeyframeNodePoseCapturesTransform) {
     EXPECT_NEAR(currentClip->tracks[0].positionKeys[0].time, 1.5f, 1e-4f);
     EXPECT_NEAR(currentClip->tracks[0].positionKeys[0].value.x, 3.0f, 1e-4f);
 }
+
+// ---------------------------------------------------------------------------
+// 7. Vulkan Error Handling & Result Stringification Test Suite
+// ---------------------------------------------------------------------------
+#include "vulkan/VulkanUtils.h"
+
+TEST(VulkanUtilsTest, VkResultToStringMapsStandardAndCustomCodes) {
+    EXPECT_STREQ(Khepri::VkResultToString(VK_SUCCESS), "VK_SUCCESS");
+    EXPECT_STREQ(Khepri::VkResultToString(VK_NOT_READY), "VK_NOT_READY");
+    EXPECT_STREQ(Khepri::VkResultToString(VK_TIMEOUT), "VK_TIMEOUT");
+    EXPECT_STREQ(Khepri::VkResultToString(VK_ERROR_OUT_OF_HOST_MEMORY), "VK_ERROR_OUT_OF_HOST_MEMORY");
+    EXPECT_STREQ(Khepri::VkResultToString(VK_ERROR_OUT_OF_DEVICE_MEMORY), "VK_ERROR_OUT_OF_DEVICE_MEMORY");
+    EXPECT_STREQ(Khepri::VkResultToString(VK_ERROR_INITIALIZATION_FAILED), "VK_ERROR_INITIALIZATION_FAILED");
+    EXPECT_STREQ(Khepri::VkResultToString(VK_ERROR_DEVICE_LOST), "VK_ERROR_DEVICE_LOST");
+    EXPECT_STREQ(Khepri::VkResultToString(VK_ERROR_SURFACE_LOST_KHR), "VK_ERROR_SURFACE_LOST_KHR");
+    EXPECT_STREQ(Khepri::VkResultToString(VK_ERROR_OUT_OF_DATE_KHR), "VK_ERROR_OUT_OF_DATE_KHR");
+    EXPECT_STREQ(Khepri::VkResultToString(static_cast<VkResult>(-99999)), "VK_RESULT_UNRECOGNIZED");
+}
+
+TEST(VulkanUtilsTest, CheckVulkanResultSucceedsOnVkSuccess) {
+    EXPECT_NO_THROW({
+        CHECK_VK_RESULT(VK_SUCCESS, "Operation must succeed");
+    });
+}
+
+TEST(VulkanUtilsTest, CheckVulkanResultThrowsDescriptiveRuntimeErrorOnFailure) {
+    try {
+        CHECK_VK_RESULT(VK_ERROR_DEVICE_LOST, "Device test failure");
+        FAIL() << "Expected std::runtime_error";
+    } catch (const std::runtime_error& e) {
+        std::string msg = e.what();
+        EXPECT_NE(msg.find("Device test failure"), std::string::npos);
+        EXPECT_NE(msg.find("VK_ERROR_DEVICE_LOST"), std::string::npos);
+        EXPECT_NE(msg.find("MainTests.cpp"), std::string::npos);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// 8. Vulkan Physical Device Abstraction & Selection Test Suite
+// ---------------------------------------------------------------------------
+#include "vulkan/PhysicalDevice.h"
+
+TEST(PhysicalDeviceTest, QueueFamilyIndicesCompletenessCheck) {
+    Khepri::QueueFamilyIndices incomplete{};
+    EXPECT_FALSE(incomplete.isComplete());
+
+    incomplete.graphicsFamily = 0;
+    EXPECT_FALSE(incomplete.isComplete());
+
+    incomplete.presentFamily = 0;
+    EXPECT_FALSE(incomplete.isComplete());
+
+    incomplete.computeFamily = 1;
+    EXPECT_TRUE(incomplete.isComplete());
+}
+
+TEST(PhysicalDeviceTest, EnumerateReturnsEmptyOnNullInstance) {
+    auto devices = Khepri::VulkanPhysicalDevice::Enumerate(VK_NULL_HANDLE);
+    EXPECT_TRUE(devices.empty());
+}
+
+TEST(PhysicalDeviceTest, SelectBestThrowsWhenNoDevicesProvided) {
+    std::vector<Khepri::VulkanPhysicalDevice> emptyList;
+    std::vector<const char*> requiredExtensions = { VK_KHR_SWAPCHAIN_EXTENSION_NAME };
+    EXPECT_THROW(Khepri::VulkanPhysicalDevice::SelectBest(emptyList, requiredExtensions), std::runtime_error);
+}
+
+TEST(PhysicalDeviceTest, SwapchainSupportDetailsAdequacyCheck) {
+    Khepri::SwapchainSupportDetails details{};
+    EXPECT_FALSE(details.IsAdequate());
+
+    details.formats.push_back(VkSurfaceFormatKHR{ VK_FORMAT_B8G8R8A8_UNORM, VK_COLOR_SPACE_SRGB_NONLINEAR_KHR });
+    EXPECT_FALSE(details.IsAdequate());
+
+    details.presentModes.push_back(VK_PRESENT_MODE_FIFO_KHR);
+    EXPECT_TRUE(details.IsAdequate());
+}
+
+// ---------------------------------------------------------------------------
+// 9. Vulkan Struct Designated Initializers & Context Helper Signatures
+// ---------------------------------------------------------------------------
+#include "vulkan/VulkanContext.h"
+#include <type_traits>
+
+TEST(VulkanStructInitTest, ValueInitializationZeroInitializesUnspecifiedFields) {
+    VkCommandBufferAllocateInfo allocInfo{};
+    allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+    allocInfo.commandPool = reinterpret_cast<VkCommandPool>(0x1234);
+    allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+    allocInfo.commandBufferCount = 3;
+
+    EXPECT_EQ(allocInfo.sType, VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO);
+    EXPECT_EQ(allocInfo.pNext, nullptr);
+    EXPECT_EQ(allocInfo.commandPool, reinterpret_cast<VkCommandPool>(0x1234));
+    EXPECT_EQ(allocInfo.level, VK_COMMAND_BUFFER_LEVEL_PRIMARY);
+    EXPECT_EQ(allocInfo.commandBufferCount, 3u);
+
+    VkCommandPoolCreateInfo poolInfo{};
+    poolInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
+    poolInfo.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
+    poolInfo.queueFamilyIndex = 0;
+
+    EXPECT_EQ(poolInfo.sType, VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO);
+    EXPECT_EQ(poolInfo.pNext, nullptr);
+    EXPECT_EQ(poolInfo.flags, static_cast<VkCommandPoolCreateFlags>(VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT));
+    EXPECT_EQ(poolInfo.queueFamilyIndex, 0u);
+}
+
+TEST(VulkanContextHelperTest, MethodSignaturesMatchModernStandards) {
+    using AllocateBuffersFn = std::vector<VkCommandBuffer>(VulkanContext::*)(VkCommandPool, uint32_t, VkCommandBufferLevel) const;
+    using AllocateBufferFn = VkCommandBuffer(VulkanContext::*)(VkCommandPool, VkCommandBufferLevel) const;
+    using CreatePoolFn = VkCommandPool(VulkanContext::*)(VkCommandPoolCreateFlags, std::optional<uint32_t>) const;
+
+    static_assert(std::is_same_v<decltype(&VulkanContext::AllocateCommandBuffers), AllocateBuffersFn>,
+                  "AllocateCommandBuffers signature mismatch");
+    static_assert(std::is_same_v<decltype(&VulkanContext::AllocateCommandBuffer), AllocateBufferFn>,
+                  "AllocateCommandBuffer signature mismatch");
+    static_assert(std::is_same_v<decltype(&VulkanContext::CreateCommandPool), CreatePoolFn>,
+                  "CreateCommandPool signature mismatch");
+    SUCCEED();
+}
+
+
