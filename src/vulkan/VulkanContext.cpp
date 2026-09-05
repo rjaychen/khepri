@@ -41,6 +41,10 @@ VulkanContext::VulkanContext(GLFWwindow* window, bool enableValidationLayers)
 }
 
 VulkanContext::~VulkanContext() {
+    m_graphicsQueue.reset();
+    m_presentQueue.reset();
+    m_computeQueue.reset();
+
     if (m_allocator != VK_NULL_HANDLE) {
         vmaDestroyAllocator(m_allocator);
     }
@@ -252,9 +256,26 @@ void VulkanContext::CreateLogicalDevice() {
 
     volkLoadDevice(m_device);
 
-    vkGetDeviceQueue(m_device, queueFamilies.graphicsFamily.value(), 0, &m_graphicsQueue);
-    vkGetDeviceQueue(m_device, queueFamilies.presentFamily.value(), 0, &m_presentQueue);
-    vkGetDeviceQueue(m_device, queueFamilies.computeFamily.value(), 0, &m_computeQueue);
+    VkQueue graphicsQueue = VK_NULL_HANDLE;
+    VkQueue presentQueue = VK_NULL_HANDLE;
+    VkQueue computeQueue = VK_NULL_HANDLE;
+
+    vkGetDeviceQueue(m_device, queueFamilies.graphicsFamily.value(), 0, &graphicsQueue);
+    vkGetDeviceQueue(m_device, queueFamilies.presentFamily.value(), 0, &presentQueue);
+    vkGetDeviceQueue(m_device, queueFamilies.computeFamily.value(), 0, &computeQueue);
+
+    m_graphicsQueue = std::make_unique<Khepri::VulkanQueue>(
+        m_device, graphicsQueue, queueFamilies.graphicsFamily.value(), 0,
+        VK_QUEUE_GRAPHICS_BIT | VK_QUEUE_COMPUTE_BIT | VK_QUEUE_TRANSFER_BIT
+    );
+    m_presentQueue = std::make_unique<Khepri::VulkanQueue>(
+        m_device, presentQueue, queueFamilies.presentFamily.value(), 0,
+        0
+    );
+    m_computeQueue = std::make_unique<Khepri::VulkanQueue>(
+        m_device, computeQueue, queueFamilies.computeFamily.value(), 0,
+        VK_QUEUE_COMPUTE_BIT | VK_QUEUE_TRANSFER_BIT
+    );
 }
 
 void VulkanContext::CreateAllocator() {
@@ -315,7 +336,7 @@ VkCommandBuffer VulkanContext::AllocateCommandBuffer(VkCommandPool commandPool, 
 }
 
 void VulkanContext::ImmediateSubmit(std::function<void(VkCommandBuffer cmd)>&& action) const {
-    if (!action) return;
+    if (!action || !m_graphicsQueue) return;
 
     const VkCommandPool commandPool = CreateCommandPool(VK_COMMAND_POOL_CREATE_TRANSIENT_BIT);
     const VkCommandBuffer cmd = AllocateCommandBuffer(commandPool);
@@ -330,15 +351,8 @@ void VulkanContext::ImmediateSubmit(std::function<void(VkCommandBuffer cmd)>&& a
     res = vkEndCommandBuffer(cmd);
     CHECK_VK_RESULT(res, "Failed to end command buffer in ImmediateSubmit");
 
-    VkSubmitInfo submitInfo{};
-    submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-    submitInfo.commandBufferCount = 1;
-    submitInfo.pCommandBuffers = &cmd;
-
-    res = vkQueueSubmit(m_graphicsQueue, 1, &submitInfo, VK_NULL_HANDLE);
+    res = m_graphicsQueue->SubmitAndWait(cmd);
     CHECK_VK_RESULT(res, "Failed to submit command buffer in ImmediateSubmit");
-    res = vkQueueWaitIdle(m_graphicsQueue);
-    CHECK_VK_RESULT(res, "Failed to wait for queue idle in ImmediateSubmit");
 
     vkFreeCommandBuffers(m_device, commandPool, 1, &cmd);
     vkDestroyCommandPool(m_device, commandPool, nullptr);

@@ -154,19 +154,67 @@ void ViewportPanel::RenderUI(Camera& camera, VkDescriptorSet& viewportTextureDS,
     ImGui::BeginGroup();
     ImGui::TextColored(ImVec4(0.3f, 0.8f, 1.0f, 1.0f), "Viewport Controls"); ImGui::SameLine();
 
-    ImGui::SetNextItemWidth(100);
+    ImGui::SetNextItemWidth(90);
     float flySpeed = camera.GetFlySpeed();
     if (ImGui::SliderFloat("Speed", &flySpeed, 0.5f, 20.0f, "%.1f")) {
         camera.SetFlySpeed(flySpeed);
     }
 
     ImGui::SameLine();
-    if (ImGui::Button("Focus Selected (F)")) {
+    if (ImGui::Button("Focus (F)")) {
         focusOnNode();
     }
 
+    // --- Gizmo Operation Mode Controls ---
     ImGui::SameLine();
-    ImGui::SetNextItemWidth(170.0f);
+    ImGui::TextDisabled("|");
+    ImGui::SameLine();
+
+    khepri::GizmoOperation currentOp = m_gizmo.GetOperation();
+    auto opButton = [&](const char* label, khepri::GizmoOperation op, const char* tooltip) {
+        bool isActive = (currentOp == op);
+        if (isActive) {
+            ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.2f, 0.55f, 0.9f, 1.0f));
+            ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.3f, 0.65f, 1.0f, 1.0f));
+        }
+        if (ImGui::Button(label)) {
+            m_gizmo.SetOperation(op);
+        }
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip("%s", tooltip);
+        }
+        if (isActive) {
+            ImGui::PopStyleColor(2);
+        }
+    };
+
+    opButton("Sel (Q)", khepri::GizmoOperation::None, "Select Mode (Q)"); ImGui::SameLine();
+    opButton("Trn (W)", khepri::GizmoOperation::Translate, "Translate Gizmo (W)"); ImGui::SameLine();
+    opButton("Rot (E)", khepri::GizmoOperation::Rotate, "Rotate Gizmo (E)"); ImGui::SameLine();
+    opButton("Scl (R)", khepri::GizmoOperation::Scale, "Scale Gizmo (R)"); ImGui::SameLine();
+
+    // World / Local Coordinate Space
+    bool isLocal = (m_gizmo.GetMode() == khepri::GizmoMode::Local);
+    if (ImGui::Button(isLocal ? "Local [X]" : "World [X]")) {
+        m_gizmo.SetMode(isLocal ? khepri::GizmoMode::World : khepri::GizmoMode::Local);
+    }
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip("Toggle Transform Space (World / Local) [X]");
+    }
+    ImGui::SameLine();
+
+    // Snapping toggle
+    if (ImGui::Checkbox("Snap", &m_gizmo.snapEnabled)) {
+    }
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip("Enable Transform Snapping (Grid / Angle / Scale)");
+    }
+
+    ImGui::SameLine();
+    ImGui::TextDisabled("|");
+    ImGui::SameLine();
+
+    ImGui::SetNextItemWidth(150.0f);
     const char* resModes[] = {
         "Auto (Fit Panel)",
         "0.5x Scale",
@@ -187,7 +235,7 @@ void ViewportPanel::RenderUI(Camera& camera, VkDescriptorSet& viewportTextureDS,
     }
 
     ImGui::SameLine();
-    ImGui::SetNextItemWidth(130.0f);
+    ImGui::SetNextItemWidth(120.0f);
     const char* aaOptions[] = { "AA: Off (1x)", "AA: 2x MSAA", "AA: 4x MSAA", "AA: 8x (Best)" };
     int currentAA = 3;
     if (m_msaaSamples == VK_SAMPLE_COUNT_1_BIT) currentAA = 0;
@@ -209,6 +257,20 @@ void ViewportPanel::RenderUI(Camera& camera, VkDescriptorSet& viewportTextureDS,
     }
     if (ImGui::IsItemHovered()) {
         ImGui::SetTooltip("Anti-Aliasing Quality\n8x MSAA provides smooth hardware edge anti-aliasing for viewport rendering.");
+    }
+
+    ImGui::SameLine();
+    ImGui::TextDisabled("|");
+    ImGui::SameLine();
+
+    ImGui::SetNextItemWidth(125.0f);
+    const char* lightModes[] = { "Lights: Selected", "Lights: All", "Lights: Hidden" };
+    int currentLightMode = static_cast<int>(m_lightHelperMode);
+    if (ImGui::Combo("##LightHelperModeCombo", &currentLightMode, lightModes, IM_ARRAYSIZE(lightModes))) {
+        m_lightHelperMode = static_cast<khepri::LightHelperDisplayMode>(currentLightMode);
+    }
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip("Light Helper Visuals (Direction, Spot Cone/FOV, Point Range):\n- Selected: Show helpers for selected light\n- All: Show helpers for all lights\n- Hidden: Hide light helpers");
     }
 
     ImGui::SameLine();
@@ -283,36 +345,81 @@ void ViewportPanel::RenderUI(Camera& camera, VkDescriptorSet& viewportTextureDS,
         ImGui::Image((ImTextureID)viewportTextureDS, viewportSize);
     }
 
-    // Unreal Engine Camera Controls (RMB Fly/Look, RMB+LMB / MMB Pan, LMB Orbit, WASDQE Fly)
+    ImVec2 canvasMin = ImGui::GetItemRectMin();
+    ImVec2 canvasMax = ImGui::GetItemRectMax();
+    ImVec2 canvasActualSize = ImVec2(canvasMax.x - canvasMin.x, canvasMax.y - canvasMin.y);
+
+    // Render 3D Transform Gizmo and ViewCube overlays via ImDrawList
+    ImDrawList* drawList = ImGui::GetWindowDrawList();
+    if (drawList && canvasActualSize.x > 10.0f && canvasActualSize.y > 10.0f) {
+        drawList->PushClipRect(canvasMin, canvasMax, true);
+
+        // 1. Light Helper Visuals (Directional rays, Spot Cone FOV, Point Light range rings)
+        khepri::LightVisualizer::RenderSceneLights(
+            drawList,
+            camera,
+            rootNode,
+            selectedNode,
+            m_lightHelperMode,
+            glm::vec2(canvasMin.x, canvasMin.y),
+            glm::vec2(canvasActualSize.x, canvasActualSize.y)
+        );
+
+        // 2. Transform Gizmo (Translate / Rotate / Scale)
+        m_gizmo.UpdateAndRender(
+            drawList,
+            camera,
+            const_cast<SceneNode*>(selectedNode),
+            glm::vec2(canvasMin.x, canvasMin.y),
+            glm::vec2(canvasActualSize.x, canvasActualSize.y)
+        );
+
+        // 2. ViewCube Navigation Widget (Top-Right)
+        m_viewCube.Render(
+            drawList,
+            camera,
+            glm::vec2(canvasMin.x, canvasMin.y),
+            glm::vec2(canvasActualSize.x, canvasActualSize.y),
+            deltaTime
+        );
+
+        drawList->PopClipRect();
+    }
+
+    // Keyboard Hotkeys for Gizmo (Q / W / E / R / X) when viewport focused/hovered
     bool rmbDown = ImGui::IsMouseDown(ImGuiMouseButton_Right);
+    if ((m_isFocused || m_isHovered) && !rmbDown && !ImGui::GetIO().WantTextInput) {
+        if (ImGui::IsKeyPressed(ImGuiKey_Q)) m_gizmo.SetOperation(khepri::GizmoOperation::None);
+        if (ImGui::IsKeyPressed(ImGuiKey_W)) m_gizmo.SetOperation(khepri::GizmoOperation::Translate);
+        if (ImGui::IsKeyPressed(ImGuiKey_E)) m_gizmo.SetOperation(khepri::GizmoOperation::Rotate);
+        if (ImGui::IsKeyPressed(ImGuiKey_R)) m_gizmo.SetOperation(khepri::GizmoOperation::Scale);
+        if (ImGui::IsKeyPressed(ImGuiKey_X)) {
+            m_gizmo.SetMode(m_gizmo.GetMode() == khepri::GizmoMode::World ? khepri::GizmoMode::Local : khepri::GizmoMode::World);
+        }
+    }
+
+    // Unreal Engine Camera Controls (RMB Fly/Look, RMB+LMB / MMB Pan, LMB Orbit, WASDQE Fly)
     bool lmbDown = ImGui::IsMouseDown(ImGuiMouseButton_Left);
     bool mmbDown = ImGui::IsMouseDown(ImGuiMouseButton_Middle);
+    bool gizmoInterceptingMouse = m_gizmo.IsUsing() || m_gizmo.IsHovered() || m_viewCube.IsHovered();
+    ImGuiIO& io = ImGui::GetIO();
 
-    if ((m_isHovered || m_isFocused) && !ImGui::IsAnyItemActive()) {
+    if ((m_isHovered || m_isFocused) && !ImGui::IsAnyItemActive() && !gizmoInterceptingMouse) {
         if (rmbDown && lmbDown) {
-            ImVec2 delta = ImGui::GetMouseDragDelta(ImGuiMouseButton_Right);
-            ImGui::ResetMouseDragDelta(ImGuiMouseButton_Right);
-            ImGui::ResetMouseDragDelta(ImGuiMouseButton_Left);
-            if (std::abs(delta.x) > 0.01f || std::abs(delta.y) > 0.01f) {
-                camera.Pan(delta.x, delta.y);
+            if (std::abs(io.MouseDelta.x) > 0.001f || std::abs(io.MouseDelta.y) > 0.001f) {
+                camera.Pan(io.MouseDelta.x, io.MouseDelta.y);
             }
         } else if (rmbDown) {
-            ImVec2 delta = ImGui::GetMouseDragDelta(ImGuiMouseButton_Right);
-            ImGui::ResetMouseDragDelta(ImGuiMouseButton_Right);
-            if (std::abs(delta.x) > 0.01f || std::abs(delta.y) > 0.01f) {
-                camera.Look(delta.x, delta.y);
+            if (std::abs(io.MouseDelta.x) > 0.001f || std::abs(io.MouseDelta.y) > 0.001f) {
+                camera.Look(io.MouseDelta.x, io.MouseDelta.y);
             }
         } else if (mmbDown) {
-            ImVec2 delta = ImGui::GetMouseDragDelta(ImGuiMouseButton_Middle);
-            ImGui::ResetMouseDragDelta(ImGuiMouseButton_Middle);
-            if (std::abs(delta.x) > 0.01f || std::abs(delta.y) > 0.01f) {
-                camera.Pan(delta.x, delta.y);
+            if (std::abs(io.MouseDelta.x) > 0.001f || std::abs(io.MouseDelta.y) > 0.001f) {
+                camera.Pan(io.MouseDelta.x, io.MouseDelta.y);
             }
         } else if (lmbDown) {
-            ImVec2 delta = ImGui::GetMouseDragDelta(ImGuiMouseButton_Left);
-            ImGui::ResetMouseDragDelta(ImGuiMouseButton_Left);
-            if (std::abs(delta.x) > 0.01f || std::abs(delta.y) > 0.01f) {
-                camera.Orbit(delta.x, delta.y);
+            if (std::abs(io.MouseDelta.x) > 0.001f || std::abs(io.MouseDelta.y) > 0.001f) {
+                camera.Orbit(io.MouseDelta.x, io.MouseDelta.y);
             }
         }
 

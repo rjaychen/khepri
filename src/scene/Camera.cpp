@@ -37,6 +37,12 @@ glm::mat4 Camera::GetViewProjectionMatrix() const {
     return GetProjectionMatrix() * GetViewMatrix();
 }
 
+void Camera::SetOrientation(float yawDegrees, float pitchDegrees) {
+    m_yaw = yawDegrees;
+    m_pitch = std::clamp(pitchDegrees, -89.0f, 89.0f);
+    UpdateVectors();
+}
+
 void Camera::Orbit(float deltaX, float deltaY) {
     float sensitivity = 0.5f;
     m_yaw += deltaX * sensitivity;

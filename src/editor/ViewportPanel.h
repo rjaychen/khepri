@@ -10,11 +10,14 @@ class SceneNode;
 
 #include <functional>
 
+#include "TransformGizmo.h"
+#include "ViewCube.h"
+#include "LightVisualizer.h"
+
 class ViewportPanel {
 public:
     ViewportPanel(VulkanContext& context);
     ~ViewportPanel();
-
 
     enum class ResolutionMode {
         FitPanel = 0,
@@ -38,6 +41,14 @@ public:
     bool IsFocused() const { return m_isFocused; }
     bool IsHovered() const { return m_isHovered; }
 
+    khepri::TransformGizmo& GetGizmo() noexcept { return m_gizmo; }
+    const khepri::TransformGizmo& GetGizmo() const noexcept { return m_gizmo; }
+    khepri::ViewCube& GetViewCube() noexcept { return m_viewCube; }
+    const khepri::ViewCube& GetViewCube() const noexcept { return m_viewCube; }
+
+    [[nodiscard]] khepri::LightHelperDisplayMode GetLightHelperMode() const noexcept { return m_lightHelperMode; }
+    void SetLightHelperMode(khepri::LightHelperDisplayMode mode) noexcept { m_lightHelperMode = mode; }
+
     VkImageView GetColorImageView() const { return m_colorImageView; }
     VkImageView GetDepthImageView() const { return m_depthImageView; }
     VkImageView GetMSAAColorImageView() const { return m_msaaColorImageView; }
@@ -58,6 +69,9 @@ public:
 private:
     VulkanContext& m_context;
     GLFWwindow* m_window = nullptr;
+    khepri::TransformGizmo m_gizmo;
+    khepri::ViewCube m_viewCube;
+    khepri::LightHelperDisplayMode m_lightHelperMode = khepri::LightHelperDisplayMode::Selected;
     uint32_t m_width = 800;
     uint32_t m_height = 600;
     ResolutionMode m_resMode = ResolutionMode::FitPanel;

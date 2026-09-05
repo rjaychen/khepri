@@ -101,31 +101,11 @@ void Buffer::CopyToBuffer(const void* data, VkDeviceSize size, VkDeviceSize offs
 void Buffer::CopyBuffer(VulkanContext& context, VkBuffer srcBuffer, VkBuffer dstBuffer, VkDeviceSize size) {
     if (!srcBuffer || !dstBuffer || size == 0) return;
 
-    const VkCommandPool commandPool = context.CreateCommandPool(VK_COMMAND_POOL_CREATE_TRANSIENT_BIT);
-    const VkCommandBuffer commandBuffer = context.AllocateCommandBuffer(commandPool);
-
-    VkCommandBufferBeginInfo beginInfo{};
-    beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-    beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-
-    vkBeginCommandBuffer(commandBuffer, &beginInfo);
-
-    VkBufferCopy copyRegion{};
-    copyRegion.srcOffset = 0;
-    copyRegion.dstOffset = 0;
-    copyRegion.size = size;
-    vkCmdCopyBuffer(commandBuffer, srcBuffer, dstBuffer, 1, &copyRegion);
-
-    vkEndCommandBuffer(commandBuffer);
-
-    VkSubmitInfo submitInfo{};
-    submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-    submitInfo.commandBufferCount = 1;
-    submitInfo.pCommandBuffers = &commandBuffer;
-
-    vkQueueSubmit(context.GetGraphicsQueue(), 1, &submitInfo, VK_NULL_HANDLE);
-    vkQueueWaitIdle(context.GetGraphicsQueue());
-
-    vkFreeCommandBuffers(context.GetDevice(), commandPool, 1, &commandBuffer);
-    vkDestroyCommandPool(context.GetDevice(), commandPool, nullptr);
+    context.ImmediateSubmit([&](VkCommandBuffer commandBuffer) {
+        VkBufferCopy copyRegion{};
+        copyRegion.srcOffset = 0;
+        copyRegion.dstOffset = 0;
+        copyRegion.size = size;
+        vkCmdCopyBuffer(commandBuffer, srcBuffer, dstBuffer, 1, &copyRegion);
+    });
 }

@@ -167,17 +167,26 @@ std::shared_ptr<MeshComponent> NodeGraphEditorPanel::GetActiveOutputMesh() const
         }
     }
 
-    // 2. Otherwise return the terminal leaf geometry output produced by the graph
-    std::shared_ptr<MeshComponent> result;
-    for (const auto& [id, node] : m_graph->GetNodes()) {
-        if (auto mesh = node->GetOutputMesh()) {
-            result = mesh;
-            if (id == m_selectedNodeId && m_previewNodeId == 0) {
-                // Keep active selection tracked if applicable
+    // 2. Active single selection preview: if selected node produces an output mesh, show it
+    if (m_selectedNodeId != 0 && m_previewNodeId == 0) {
+        if (auto selNode = m_graph->GetNode(m_selectedNodeId)) {
+            if (auto selMesh = selNode->GetOutputMesh()) {
+                return selMesh;
             }
         }
     }
-    return result;
+
+    // 3. Fallback to topological terminal leaf node (the latest geometry node in DAG)
+    auto sortedNodes = m_graph->TopologicalSort();
+    for (auto it = sortedNodes.rbegin(); it != sortedNodes.rend(); ++it) {
+        if (*it) {
+            if (auto mesh = (*it)->GetOutputMesh()) {
+                return mesh;
+            }
+        }
+    }
+
+    return nullptr;
 }
 
 void NodeGraphEditorPanel::RenderNodePropertiesInspector() {

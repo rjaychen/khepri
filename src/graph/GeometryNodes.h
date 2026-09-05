@@ -126,6 +126,8 @@ public:
 
     void Evaluate() override;
 
+    [[nodiscard]] OpType GetOpType() const noexcept { return m_opType; }
+    void SetOpType(OpType op) noexcept { m_opType = op; MarkDirty(); }
     [[nodiscard]] std::shared_ptr<MeshComponent> GetOutputMesh() const noexcept override { return m_outputMesh; }
     [[nodiscard]] bool GetApplyToChildren() const noexcept { return m_applyToChildren; }
     void SetApplyToChildren(bool apply) noexcept { m_applyToChildren = apply; MarkDirty(); }

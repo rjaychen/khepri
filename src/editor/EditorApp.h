@@ -19,6 +19,7 @@
 #include "VulkanInspectorPanel.h"
 #include "NodeGraphEditorPanel.h"
 #include "AssetManagerPanel.h"
+#include "OracleBridge.h"
 
 #include <imgui.h>
 #include <imgui_impl_glfw.h>
@@ -110,4 +111,5 @@ private:
     bool m_rebuildLayout = true;
     char m_gltfPathInput[512] = "assets/models/Box.gltf";
     bool m_openGltfModal = false;
+    khepri::OracleBridge m_oracleBridge;
 };

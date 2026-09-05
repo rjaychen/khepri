@@ -4,7 +4,7 @@ if(POLICY CMP0135)
     cmake_policy(SET CMP0135 NEW)
 endif()
 
-project(KhepriEngine VERSION 0.1.6 LANGUAGES C CXX)
+project(KhepriEngine VERSION 0.1.7 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -247,6 +247,8 @@ list(APPEND EDITOR_SOURCES
     "${CMAKE_CURRENT_SOURCE_DIR}/src/main.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/editor/AssetManagerPanel.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/editor/AssetManagerPanel.h"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/editor/OracleBridge.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/editor/OracleBridge.h"
 )
 list(REMOVE_DUPLICATES EDITOR_SOURCES)
 
@@ -299,10 +301,18 @@ if(BUILD_TESTS)
         "tests/*.hpp"
     )
 
-    # NodeGraphEditorPanel is needed for UI tests
+    # Editor sources needed for UI and Gizmo/ViewCube tests
     set(TEST_ADDITIONAL_SOURCES
         src/editor/NodeGraphEditorPanel.cpp
         src/editor/NodeGraphEditorPanel.h
+        src/editor/TransformGizmo.cpp
+        src/editor/TransformGizmo.h
+        src/editor/ViewCube.cpp
+        src/editor/ViewCube.h
+        src/editor/LightVisualizer.cpp
+        src/editor/LightVisualizer.h
+        src/editor/SceneTreePanel.cpp
+        src/editor/SceneTreePanel.h
     )
 
     add_executable(KhepriEngineTests

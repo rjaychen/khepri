@@ -13,6 +13,7 @@ namespace khepri { class NodeGraphEditorPanel; }
 
 class SceneTreePanel {
 public:
+    SceneTreePanel(VulkanContext* context = nullptr);
     SceneTreePanel(VulkanContext& context);
 
     // activeMesh is updated when a new primitive is added so EditorApp can focus camera on it.
@@ -22,7 +23,13 @@ public:
                   khepri::NodeGraphEditorPanel* nodeGraphPanel = nullptr);
 
     SceneNode* GetSelectedNode() const { return m_selectedNode; }
+    void SetSelectedNode(SceneNode* node) { m_selectedNode = node; }
     void ClearSelectedNode() { m_selectedNode = nullptr; }
+    void ValidateSelection(const SceneNode* rootNode) noexcept {
+        if (m_selectedNode && (!rootNode || !rootNode->Contains(m_selectedNode))) {
+            m_selectedNode = nullptr;
+        }
+    }
 
     void SetImportModelCallback(std::function<void(const std::string&)> cb) { m_onImportModel = std::move(cb); }
     void SetOpenModelCallback(std::function<void(const std::string&)> cb) { m_onOpenModel = std::move(cb); }
@@ -33,7 +40,7 @@ private:
                          khepri::NodeGraphEditorPanel* nodeGraphPanel);
     void RenderFileAssetInspector(const std::filesystem::path& assetPath);
 
-    VulkanContext& m_context;
+    VulkanContext* m_context{nullptr};
     SceneNode* m_selectedNode = nullptr;
     int m_addPrimitiveType = 0; // 0: Cube, 1: Sphere, 2: Cylinder, 3: Plane
 

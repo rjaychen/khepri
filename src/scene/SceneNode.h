@@ -25,6 +25,8 @@ public:
     SceneNode(const std::string& name = "Node");
     virtual ~SceneNode() = default;
 
+    [[nodiscard]] virtual bool IsLightNode() const noexcept { return false; }
+
     std::string name;
     uint32_t id;
     static uint32_t s_nextId;
@@ -58,6 +60,7 @@ public:
     void RemoveChild(SceneNode* child);
     std::unique_ptr<SceneNode> DetachChild(SceneNode* child);
     bool IsDescendantOf(const SceneNode* possibleAncestor) const;
+    bool Contains(const SceneNode* target) const noexcept;
 
     // Reflected Properties implementation
     std::vector<Property>& GetProperties() override { return m_properties; }

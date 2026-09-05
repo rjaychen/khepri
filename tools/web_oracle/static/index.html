@@ -1,0 +1,351 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Khepri Engine - Web Oracle Stream</title>
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      user-select: none;
+      -webkit-user-select: none;
+    }
+
+    body, html {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background-color: #0d0f12;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+    }
+
+    #container {
+      position: relative;
+      width: 100%;
+      height: 100%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background-color: #08090a;
+    }
+
+    #stream-canvas {
+      display: block;
+      max-width: 100%;
+      max-height: 100%;
+      object-fit: contain;
+      cursor: crosshair;
+      box-shadow: 0 0 20px rgba(0, 0, 0, 0.8);
+      outline: none;
+    }
+
+    #status-overlay {
+      position: absolute;
+      top: 12px;
+      left: 14px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      background: rgba(18, 22, 28, 0.85);
+      backdrop-filter: blur(8px);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      padding: 6px 12px;
+      border-radius: 6px;
+      font-size: 12px;
+      color: #e1e4e8;
+      pointer-events: none;
+      z-index: 10;
+      transition: opacity 0.3s ease;
+    }
+
+    .status-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background-color: #f59e0b; /* Amber = connecting */
+    }
+
+    .status-dot.connected {
+      background-color: #10b981; /* Green = connected */
+      box-shadow: 0 0 6px rgba(16, 185, 129, 0.6);
+    }
+
+    .status-dot.disconnected {
+      background-color: #ef4444; /* Red = disconnected */
+    }
+
+    #stats-badge {
+      color: #94a3b8;
+      font-family: monospace;
+      font-size: 11px;
+    }
+
+    #loading-screen {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      background-color: #0e1117;
+      color: #f1f5f9;
+      z-index: 5;
+      gap: 16px;
+      transition: opacity 0.4s ease;
+    }
+
+    #loading-screen.hidden {
+      opacity: 0;
+      pointer-events: none;
+    }
+
+    .spinner {
+      width: 36px;
+      height: 36px;
+      border: 3px solid rgba(56, 189, 248, 0.2);
+      border-top-color: #38bdf8;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+  </style>
+</head>
+<body>
+  <div id="container">
+    <div id="status-overlay">
+      <div id="status-dot" class="status-dot"></div>
+      <span id="status-text">Connecting to Khepri Stream...</span>
+      <span id="stats-badge"></span>
+    </div>
+
+    <div id="loading-screen">
+      <div class="spinner"></div>
+      <p id="loading-message">Connecting to Khepri Web Oracle...</p>
+    </div>
+
+    <canvas id="stream-canvas" tabindex="0"></canvas>
+  </div>
+
+  <script>
+    (function () {
+      const canvas = document.getElementById('stream-canvas');
+      const ctx = canvas.getContext('2d', { alpha: false });
+      const statusDot = document.getElementById('status-dot');
+      const statusText = document.getElementById('status-text');
+      const statsBadge = document.getElementById('stats-badge');
+      const loadingScreen = document.getElementById('loading-screen');
+      const loadingMsg = document.getElementById('loading-message');
+
+      let ws = null;
+      let frameCount = 0;
+      let lastFpsTime = performance.now();
+      let currentFps = 0;
+      let nativeWidth = 1280;
+      let nativeHeight = 720;
+      let isFirstFrame = true;
+
+      const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      const wsUrl = `${wsProtocol}//${window.location.host}/ws`;
+
+      function setStatus(connected, text, info = '') {
+        statusDot.className = 'status-dot ' + (connected ? 'connected' : 'disconnected');
+        statusText.textContent = text;
+        statsBadge.textContent = info;
+        if (connected) {
+          loadingScreen.classList.add('hidden');
+        } else {
+          loadingScreen.classList.remove('hidden');
+          loadingMsg.textContent = text;
+        }
+      }
+
+      function connect() {
+        setStatus(false, 'Connecting to stream...');
+        ws = new WebSocket(wsUrl);
+        ws.binaryType = 'arraybuffer';
+
+        ws.onopen = () => {
+          setStatus(true, 'Live Connected');
+          // Focus canvas for immediate keyboard interactivity
+          canvas.focus();
+        };
+
+        ws.onmessage = (event) => {
+          if (typeof event.data === 'string') {
+            try {
+              const meta = JSON.parse(event.data);
+              if (meta.type === 'metadata') {
+                if (meta.width && meta.height) {
+                  nativeWidth = meta.width;
+                  nativeHeight = meta.height;
+                  if (canvas.width !== nativeWidth || canvas.height !== nativeHeight) {
+                    canvas.width = nativeWidth;
+                    canvas.height = nativeHeight;
+                  }
+                }
+              }
+            } catch (e) {
+              console.error('Failed to parse metadata JSON:', e);
+            }
+          } else if (event.data instanceof ArrayBuffer) {
+            const blob = new Blob([event.data], { type: 'image/jpeg' });
+            createImageBitmap(blob).then((bitmap) => {
+              if (canvas.width !== bitmap.width || canvas.height !== bitmap.height) {
+                canvas.width = bitmap.width;
+                canvas.height = bitmap.height;
+                nativeWidth = bitmap.width;
+                nativeHeight = bitmap.height;
+              }
+              ctx.drawImage(bitmap, 0, 0);
+              bitmap.close();
+
+              if (isFirstFrame) {
+                isFirstFrame = false;
+                loadingScreen.classList.add('hidden');
+              }
+
+              frameCount++;
+              const now = performance.now();
+              if (now - lastFpsTime >= 1000) {
+                currentFps = Math.round((frameCount * 1000) / (now - lastFpsTime));
+                frameCount = 0;
+                lastFpsTime = now;
+                statsBadge.textContent = `${nativeWidth}x${nativeHeight} | ${currentFps} FPS`;
+              }
+            }).catch((err) => {
+              console.warn('Frame render decode error:', err);
+            });
+          }
+        };
+
+        ws.onclose = () => {
+          setStatus(false, 'Disconnected from Khepri Engine. Reconnecting...');
+          setTimeout(connect, 2000);
+        };
+
+        ws.onerror = () => {
+          ws.close();
+        };
+      }
+
+      function sendEvent(data) {
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify(data));
+        }
+      }
+
+      function getNormalizedCoords(e) {
+        const rect = canvas.getBoundingClientRect();
+        const clientX = e.clientX - rect.left;
+        const clientY = e.clientY - rect.top;
+        const nx = Math.max(0, Math.min(1, clientX / rect.width));
+        const ny = Math.max(0, Math.min(1, clientY / rect.height));
+        return { x: nx, y: ny };
+      }
+
+      // Mouse Events
+      canvas.addEventListener('mousedown', (e) => {
+        canvas.focus();
+        const { x, y } = getNormalizedCoords(e);
+        sendEvent({
+          type: 'mouse',
+          action: 'down',
+          button: e.button, // 0: left, 1: middle, 2: right
+          x: x,
+          y: y
+        });
+        e.preventDefault();
+      });
+
+      window.addEventListener('mouseup', (e) => {
+        const { x, y } = getNormalizedCoords(e);
+        sendEvent({
+          type: 'mouse',
+          action: 'up',
+          button: e.button,
+          x: x,
+          y: y
+        });
+      });
+
+      canvas.addEventListener('mousemove', (e) => {
+        const { x, y } = getNormalizedCoords(e);
+        sendEvent({
+          type: 'mouse',
+          action: 'move',
+          button: e.buttons,
+          x: x,
+          y: y
+        });
+      });
+
+      canvas.addEventListener('wheel', (e) => {
+        const { x, y } = getNormalizedCoords(e);
+        sendEvent({
+          type: 'mouse',
+          action: 'wheel',
+          deltaY: e.deltaY,
+          x: x,
+          y: y
+        });
+        e.preventDefault();
+      }, { passive: false });
+
+      canvas.addEventListener('contextmenu', (e) => {
+        e.preventDefault();
+      });
+
+      // Keyboard Events
+      window.addEventListener('keydown', (e) => {
+        // Only capture keyboard events if target is canvas or body
+        if (document.activeElement === canvas || document.activeElement === document.body) {
+          sendEvent({
+            type: 'key',
+            action: 'down',
+            code: e.code,
+            key: e.key,
+            ctrl: e.ctrlKey,
+            shift: e.shiftKey,
+            alt: e.altKey
+          });
+
+          // Prevent default browser shortcuts when interacting with engine
+          if (['Space', 'Tab', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Delete', 'Backspace'].includes(e.code) ||
+              (e.ctrlKey && ['KeyZ', 'KeyY', 'KeyS', 'KeyO', 'KeyA'].includes(e.code))) {
+            e.preventDefault();
+          }
+        }
+      });
+
+      window.addEventListener('keyup', (e) => {
+        if (document.activeElement === canvas || document.activeElement === document.body) {
+          sendEvent({
+            type: 'key',
+            action: 'up',
+            code: e.code,
+            key: e.key,
+            ctrl: e.ctrlKey,
+            shift: e.shiftKey,
+            alt: e.altKey
+          });
+        }
+      });
+
+      // Start connection
+      connect();
+    })();
+  </script>
+</body>
+</html>

@@ -3,6 +3,6 @@
 namespace KhepriEngine {
     constexpr int VERSION_MAJOR = 0;
     constexpr int VERSION_MINOR = 1;
-    constexpr int VERSION_PATCH = 6;
-    constexpr const char* VERSION_STRING = "0.1.6";
+    constexpr int VERSION_PATCH = 7;
+    constexpr const char* VERSION_STRING = "0.1.7";
 }

@@ -9,9 +9,11 @@
 #include <memory>
 #include <functional>
 #include "PhysicalDevice.h"
+#include "VulkanQueue.h"
 
 using QueueFamilyIndices = Khepri::QueueFamilyIndices;
 using VulkanPhysicalDevice = Khepri::VulkanPhysicalDevice;
+using VulkanQueue = Khepri::VulkanQueue;
 
 class VulkanContext {
 public:
@@ -28,9 +30,18 @@ public:
 
     VkDevice GetDevice() const { return m_device; }
     VkSurfaceKHR GetSurface() const { return m_surface; }
-    VkQueue GetGraphicsQueue() const { return m_graphicsQueue; }
-    VkQueue GetPresentQueue() const { return m_presentQueue; }
-    VkQueue GetComputeQueue() const { return m_computeQueue; }
+    const Khepri::VulkanQueue& GetGraphicsQueue() const { return *m_graphicsQueue; }
+    Khepri::VulkanQueue& GetGraphicsQueue() { return *m_graphicsQueue; }
+
+    const Khepri::VulkanQueue& GetPresentQueue() const { return *m_presentQueue; }
+    Khepri::VulkanQueue& GetPresentQueue() { return *m_presentQueue; }
+
+    const Khepri::VulkanQueue& GetComputeQueue() const { return *m_computeQueue; }
+    Khepri::VulkanQueue& GetComputeQueue() { return *m_computeQueue; }
+
+    VkQueue GetGraphicsQueueHandle() const { return m_graphicsQueue ? m_graphicsQueue->GetHandle() : VK_NULL_HANDLE; }
+    VkQueue GetPresentQueueHandle() const { return m_presentQueue ? m_presentQueue->GetHandle() : VK_NULL_HANDLE; }
+    VkQueue GetComputeQueueHandle() const { return m_computeQueue ? m_computeQueue->GetHandle() : VK_NULL_HANDLE; }
     Khepri::QueueFamilyIndices GetQueueFamilies() const { return m_physicalDevice.GetQueueFamilies(); }
     VmaAllocator GetAllocator() const { return m_allocator; }
     VkPhysicalDeviceProperties GetDeviceProperties() const { return m_physicalDevice.GetProperties(); }
@@ -80,9 +91,9 @@ private:
 
     VkDevice m_device = VK_NULL_HANDLE;
 
-    VkQueue m_graphicsQueue = VK_NULL_HANDLE;
-    VkQueue m_presentQueue = VK_NULL_HANDLE;
-    VkQueue m_computeQueue = VK_NULL_HANDLE;
+    std::unique_ptr<Khepri::VulkanQueue> m_graphicsQueue;
+    std::unique_ptr<Khepri::VulkanQueue> m_presentQueue;
+    std::unique_ptr<Khepri::VulkanQueue> m_computeQueue;
 
     VmaAllocator m_allocator = VK_NULL_HANDLE;
 

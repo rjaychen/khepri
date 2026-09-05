@@ -32,6 +32,7 @@ public:
     glm::vec3 GetTarget() const { return m_target; }
     float GetFlySpeed() const { return m_flySpeed; }
     void SetFlySpeed(float speed) { m_flySpeed = std::max(0.1f, speed); }
+    void SetOrientation(float yawDegrees, float pitchDegrees);
     float GetYaw() const { return m_yaw; }
     float GetPitch() const { return m_pitch; }
     float GetDistance() const { return m_distance; }

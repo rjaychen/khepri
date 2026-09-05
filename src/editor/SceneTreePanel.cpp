@@ -1,10 +1,14 @@
 #include "SceneTreePanel.h"
 #include "NodeGraphEditorPanel.h"
 #include "../scene/MeshComponent.h"
+#include "../scene/LightNode.h"
 #include <glm/gtc/type_ptr.hpp>
 
-SceneTreePanel::SceneTreePanel(VulkanContext& context)
+SceneTreePanel::SceneTreePanel(VulkanContext* context)
     : m_context(context) {}
+
+SceneTreePanel::SceneTreePanel(VulkanContext& context)
+    : m_context(&context) {}
 
 #include "../assets/AssetManager.h"
 #include <fstream>
@@ -12,6 +16,7 @@ SceneTreePanel::SceneTreePanel(VulkanContext& context)
 void SceneTreePanel::RenderUI(SceneNode* rootNode, std::shared_ptr<MeshComponent>& activeMesh,
                               const std::filesystem::path& selectedAssetPath,
                               khepri::NodeGraphEditorPanel* nodeGraphPanel) {
+    ValidateSelection(rootNode);
     ImGui::Begin("Scene Hierarchy");
 
     // --- Add Dropdown Section ---
@@ -54,29 +59,13 @@ void SceneTreePanel::RenderUI(SceneNode* rootNode, std::shared_ptr<MeshComponent
             }
             if (ImGui::BeginMenu("Light")) {
                 if (ImGui::MenuItem("Directional Light (Sun)")) {
-                    auto node = std::make_unique<SceneNode>("Directional Light");
-                    node->position = glm::vec3(0.0f, 10.0f, 0.0f);
-                    node->rotationDegrees = glm::vec3(-45.0f, 45.0f, 0.0f);
-                    node->lightComponent = std::make_shared<LightComponent>(LightType::Directional);
-                    node->lightComponent->color = glm::vec3(1.0f, 0.95f, 0.85f);
-                    m_selectedNode = rootNode->AddChild(std::move(node));
+                    m_selectedNode = rootNode->AddChild(std::make_unique<DirectionalLightNode>("Directional Light"));
                 }
                 if (ImGui::MenuItem("Point Light")) {
-                    auto node = std::make_unique<SceneNode>("Point Light");
-                    node->position = glm::vec3(0.0f, 3.0f, 0.0f);
-                    node->lightComponent = std::make_shared<LightComponent>(LightType::Point);
-                    node->lightComponent->color = glm::vec3(1.0f, 0.8f, 0.4f);
-                    node->lightComponent->intensity = 2.0f;
-                    m_selectedNode = rootNode->AddChild(std::move(node));
+                    m_selectedNode = rootNode->AddChild(std::make_unique<PointLightNode>("Point Light"));
                 }
                 if (ImGui::MenuItem("Spot Light")) {
-                    auto node = std::make_unique<SceneNode>("Spot Light");
-                    node->position = glm::vec3(0.0f, 4.0f, 2.0f);
-                    node->rotationDegrees = glm::vec3(-30.0f, 0.0f, 0.0f);
-                    node->lightComponent = std::make_shared<LightComponent>(LightType::Spot);
-                    node->lightComponent->color = glm::vec3(0.4f, 0.8f, 1.0f);
-                    node->lightComponent->intensity = 3.0f;
-                    m_selectedNode = rootNode->AddChild(std::move(node));
+                    m_selectedNode = rootNode->AddChild(std::make_unique<SpotLightNode>("Spot Light"));
                 }
                 ImGui::EndMenu();
             }
@@ -233,9 +222,8 @@ void SceneTreePanel::RenderNodeTree(SceneNode* node) {
     ImGui::SameLine();
 
     // --- Tree Node Label (greyed out if hidden) ---
-    ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_OpenOnArrow
-                             | ImGuiTreeNodeFlags_OpenOnDoubleClick
-                             | ImGuiTreeNodeFlags_SpanAvailWidth;
+    ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_SpanAvailWidth;
+    if (node->GetParent() == nullptr) flags |= ImGuiTreeNodeFlags_DefaultOpen;
     if (node == m_selectedNode)      flags |= ImGuiTreeNodeFlags_Selected;
     if (node->GetChildren().empty()) flags |= ImGuiTreeNodeFlags_Leaf;
 
@@ -294,7 +282,9 @@ void SceneTreePanel::RenderNodeTree(SceneNode* node) {
     if (ImGui::BeginPopupContextItem("##ctx")) {
         if (ImGui::MenuItem("Delete")) {
             if (node->GetParent()) {
-                if (m_selectedNode == node) m_selectedNode = nullptr;
+                if (m_selectedNode && (m_selectedNode == node || node->Contains(m_selectedNode))) {
+                    m_selectedNode = nullptr;
+                }
                 auto nodeHasMesh = [](SceneNode* n, auto& recurse) -> bool {
                     if (n->mesh) return true;
                     for (const auto& c : n->GetChildren())
@@ -302,7 +292,7 @@ void SceneTreePanel::RenderNodeTree(SceneNode* node) {
                     return false;
                 };
                 if (nodeHasMesh(node, nodeHasMesh)) {
-                    m_context.WaitIdle();
+                    if (m_context) m_context->WaitIdle();
                 }
                 node->GetParent()->RemoveChild(node);
                 ImGui::EndPopup();
@@ -388,6 +378,7 @@ void SceneTreePanel::RenderInspector(SceneNode* node, const std::filesystem::pat
         }
 
         if (node->lightComponent->type == LightType::Point || node->lightComponent->type == LightType::Spot) {
+            ImGui::DragFloat("Range (m)", &node->lightComponent->range, 0.1f, 0.1f, 100.0f, "%.1f m");
             ImGui::TextDisabled("Distance Attenuation Factors:");
             ImGui::DragFloat("Constant", &node->lightComponent->constantAttenuation, 0.01f, 0.1f, 10.0f);
             ImGui::DragFloat("Linear", &node->lightComponent->linearAttenuation, 0.005f, 0.0f, 2.0f);

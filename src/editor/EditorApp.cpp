@@ -3,6 +3,7 @@
 #include "../core/FileDialog.h"
 #include "../mesh/GLTFImporter.h"
 #include "../assets/AssetManager.h"
+#include "../scene/LightNode.h"
 #include "../vulkan/VulkanUtils.h"
 #include <glm/gtc/matrix_transform.hpp>
 #include <chrono>
@@ -41,23 +42,25 @@ void EditorApp::SetEditorMode(EditorMode mode) {
 
 void EditorApp::OpenSceneModel(const std::string& path) {
     m_context->WaitIdle();
+    if (m_sceneTreePanel) {
+        m_sceneTreePanel->ClearSelectedNode();
+    }
     VkBuffer lightBuf = m_lightUBOBuffer ? m_lightUBOBuffer->GetBuffer() : VK_NULL_HANDLE;
     auto loadedNode = ModelImporter::LoadFromFile(*m_context, path, m_textureDescriptorSetLayout, m_descriptorAllocator.get(), lightBuf);
     if (loadedNode) {
         m_rootNode = loadedNode;
 
         // Ensure scene root has a default sun light
-        auto sunNode = std::make_unique<SceneNode>("Sun / Main Light");
-        sunNode->position = glm::vec3(5.0f, 10.0f, 5.0f);
-        sunNode->rotationDegrees = glm::vec3(-45.0f, 45.0f, 0.0f);
-        sunNode->lightComponent = std::make_shared<LightComponent>(LightType::Directional);
-        sunNode->lightComponent->color = glm::vec3(1.0f, 0.95f, 0.85f);
-        m_rootNode->AddChild(std::move(sunNode));
+        m_rootNode->AddChild(std::make_unique<DirectionalLightNode>("Sun / Main Light", glm::vec3(5.0f, 10.0f, 5.0f), glm::vec3(-45.0f, 45.0f, 0.0f)));
 
         const auto& children = m_rootNode->GetChildren();
         if (!children.empty() && children[0]->mesh) {
             m_activeDisplayMesh = children[0]->mesh;
+            if (m_sceneTreePanel) {
+                m_sceneTreePanel->SetSelectedNode(children[0].get());
+            }
             if (m_nodeGraphEditorPanel) {
+                m_nodeGraphEditorPanel->SetTargetSceneNode(children[0].get());
                 m_nodeGraphEditorPanel->SetImportedMesh(m_activeDisplayMesh);
             }
         }
@@ -80,6 +83,7 @@ void EditorApp::ImportModelIntoScene(const std::string& path) {
         std::string stemName = std::filesystem::path(path).stem().string();
         if (stemName.empty()) stemName = "Imported Model";
 
+        SceneNode* newlyAdded = nullptr;
         const auto& loadedChildren = loadedNode->GetChildren();
         if (!loadedChildren.empty()) {
             for (const auto& child : loadedChildren) {
@@ -88,23 +92,23 @@ void EditorApp::ImportModelIntoScene(const std::string& path) {
                     std::string nodeName = (loadedChildren.size() == 1) ? stemName : (stemName + " (" + child->name + ")");
                     auto importedChild = std::make_unique<SceneNode>(nodeName);
                     importedChild->mesh = child->mesh;
-                    m_rootNode->AddChild(std::move(importedChild));
+                    newlyAdded = m_rootNode->AddChild(std::move(importedChild));
                 }
             }
         } else if (loadedNode->mesh) {
             m_activeDisplayMesh = loadedNode->mesh;
             auto importedChild = std::make_unique<SceneNode>(stemName);
             importedChild->mesh = loadedNode->mesh;
-            m_rootNode->AddChild(std::move(importedChild));
+            newlyAdded = m_rootNode->AddChild(std::move(importedChild));
         }
 
-        if (m_activeDisplayMesh && m_nodeGraphEditorPanel) {
-            const auto& children = m_rootNode->GetChildren();
-            if (!children.empty()) {
-                SceneNode* importedNode = children.back().get();
-                m_nodeGraphEditorPanel->SetTargetSceneNode(importedNode);
-                m_nodeGraphEditorPanel->SetImportedMesh(m_activeDisplayMesh);
-            }
+        if (newlyAdded && m_sceneTreePanel) {
+            m_sceneTreePanel->SetSelectedNode(newlyAdded);
+        }
+
+        if (m_activeDisplayMesh && m_nodeGraphEditorPanel && newlyAdded) {
+            m_nodeGraphEditorPanel->SetTargetSceneNode(newlyAdded);
+            m_nodeGraphEditorPanel->SetImportedMesh(m_activeDisplayMesh);
         }
         m_camera.FocusOnTarget(glm::vec3(0.0f), 4.0f);
         LOG_INFO("Imported model into current scene: " + path);
@@ -115,6 +119,9 @@ void EditorApp::ImportModelIntoScene(const std::string& path) {
 
 void EditorApp::LoadSampleModel(const std::string& name) {
     m_context->WaitIdle();
+    if (m_sceneTreePanel) {
+        m_sceneTreePanel->ClearSelectedNode();
+    }
     if (name == "Box") {
         OpenSceneModel("assets/models/Box.gltf");
     } else {
@@ -122,7 +129,14 @@ void EditorApp::LoadSampleModel(const std::string& name) {
         m_rootNode = std::make_shared<SceneNode>("Scene Root");
         auto childNode = std::make_unique<SceneNode>(name + " Node");
         childNode->mesh = m_activeDisplayMesh;
-        m_rootNode->AddChild(std::move(childNode));
+        SceneNode* addedChild = m_rootNode->AddChild(std::move(childNode));
+        if (m_sceneTreePanel) {
+            m_sceneTreePanel->SetSelectedNode(addedChild);
+        }
+        if (m_nodeGraphEditorPanel) {
+            m_nodeGraphEditorPanel->SetTargetSceneNode(addedChild);
+            m_nodeGraphEditorPanel->SetImportedMesh(m_activeDisplayMesh);
+        }
         m_camera.FocusOnTarget(glm::vec3(0.0f), 4.0f);
         LOG_INFO("Loaded sample primitive model: " + name);
     }
@@ -612,29 +626,28 @@ void EditorApp::CreateRenderPipeline() {
 
 void EditorApp::BuildSampleScene() {
     m_rootNode = std::make_unique<SceneNode>("Scene Root");
-    m_lightGizmoMesh = MeshComponent::CreateCube(*m_context, 0.25f);
+    m_lightGizmoMesh = MeshComponent::CreateSphere(*m_context, 0.45f, 32, 16);
+    if (m_lightGizmoMesh) {
+        LOG_INFO("Created light gizmo sphere mesh: " + std::to_string(m_lightGizmoMesh->GetVertices().size()) + " vertices, " + std::to_string(m_lightGizmoMesh->GetIndexCount()) + " indices");
+    } else {
+        LOG_ERROR("Failed to create light gizmo sphere mesh!");
+    }
 
-    // Add default Sun / Directional light node
-    auto sunNode = std::make_unique<SceneNode>("Sun / Main Light");
-    sunNode->position = glm::vec3(5.0f, 10.0f, 5.0f);
-    sunNode->rotationDegrees = glm::vec3(-45.0f, 45.0f, 0.0f);
-    sunNode->lightComponent = std::make_shared<LightComponent>(LightType::Directional);
-    sunNode->lightComponent->color = glm::vec3(1.0f, 0.95f, 0.85f);
-    sunNode->lightComponent->intensity = 1.0f;
-    m_rootNode->AddChild(std::move(sunNode));
+    // Add default Sun / Directional light node (Unreal ALight/ADirectionalLight style)
+    m_rootNode->AddChild(std::make_unique<DirectionalLightNode>("Sun / Main Light", glm::vec3(2.0f, 2.0f, 2.0f), glm::vec3(-45.0f, 45.0f, 0.0f)));
 
-    // Default cube in scene so viewport isn't empty on startup
-    auto cubeNode = std::make_unique<SceneNode>("Cube");
-    cubeNode->mesh = MeshComponent::CreateCube(*m_context, 1.0f);
-    SceneNode* cubePtr = m_rootNode->AddChild(std::move(cubeNode));
+    // Default object in scene is now a Cylinder so it's not a cube!
+    auto demoNode = std::make_unique<SceneNode>("Demo Cylinder");
+    demoNode->mesh = MeshComponent::CreateCylinder(*m_context, 0.5f, 1.2f, 32);
+    SceneNode* demoPtr = m_rootNode->AddChild(std::move(demoNode));
 
     if (m_nodeGraphEditorPanel) {
-        // Bind cube as target scene node and initialize graph
-        m_nodeGraphEditorPanel->SetTargetSceneNode(cubePtr);
+        // Bind demo mesh as target scene node and initialize graph
+        m_nodeGraphEditorPanel->SetTargetSceneNode(demoPtr);
         auto graphMesh = m_nodeGraphEditorPanel->GetActiveOutputMesh();
-        m_activeDisplayMesh = graphMesh ? graphMesh : cubePtr->mesh;
+        m_activeDisplayMesh = graphMesh ? graphMesh : demoPtr->mesh;
     } else {
-        m_activeDisplayMesh = cubePtr->mesh;
+        m_activeDisplayMesh = demoPtr->mesh;
     }
 
     // Sample animation clip — NOT playing on startup (user must press Play)
@@ -643,7 +656,7 @@ void EditorApp::BuildSampleScene() {
     clip->duration = 4.0f;
 
     AnimationTrack track;
-    track.targetNodeName = "Cube";
+    track.targetNodeName = "Demo Cylinder";
     track.positionKeys = {
         {0.0f, glm::vec3(0.0f, 0.0f, 0.0f)},
         {2.0f, glm::vec3(0.0f, 1.5f, 0.0f)},
@@ -673,12 +686,29 @@ void EditorApp::DrawSceneNode(VkCommandBuffer cmd, SceneNode* node, const glm::m
     // Compose world transform from parent and this node's local transform
     glm::mat4 worldTransform = parentTransform * node->GetLocalTransform();
 
-    // Draw the node's mesh (if it has one), or light gizmo stub if it's a light node without a custom mesh
+    // Draw the node's mesh (if it has one), or light gizmo stub if it's a light node
     std::shared_ptr<MeshComponent> targetMesh = node->mesh;
-    bool isLightGizmo = false;
-    if (!targetMesh && node->lightComponent && m_lightGizmoMesh) {
+    bool isLightGizmo = node->IsLightNode() || (node->lightComponent != nullptr);
+    if (!targetMesh && isLightGizmo && m_lightGizmoMesh) {
         targetMesh = m_lightGizmoMesh;
-        isLightGizmo = true;
+        static bool s_loggedGizmoDraw = false;
+        if (!s_loggedGizmoDraw) {
+            LOG_INFO("Drawing light gizmo for node: " + node->name + " with mesh vertices: " + std::to_string(targetMesh->GetVertices().size()));
+            s_loggedGizmoDraw = true;
+        }
+    }
+
+    glm::mat4 renderTransform = worldTransform;
+    if (isLightGizmo) {
+        // Strip scale from world transform so light gizmo maintains fixed compact size regardless of node scaling
+        glm::vec3 worldPos = glm::vec3(worldTransform[3]);
+        glm::mat3 rotMat(worldTransform);
+        if (glm::length(rotMat[0]) > 1e-5f) rotMat[0] = glm::normalize(rotMat[0]);
+        if (glm::length(rotMat[1]) > 1e-5f) rotMat[1] = glm::normalize(rotMat[1]);
+        if (glm::length(rotMat[2]) > 1e-5f) rotMat[2] = glm::normalize(rotMat[2]);
+
+        renderTransform = glm::mat4(rotMat);
+        renderTransform[3] = glm::vec4(worldPos, 1.0f);
     }
 
     if (targetMesh) {
@@ -690,14 +720,14 @@ void EditorApp::DrawSceneNode(VkCommandBuffer cmd, SceneNode* node, const glm::m
                                 0, 1, &textureDS, 0, nullptr);
 
         PushConstants push{};
-        push.model = worldTransform;
-        push.mvp   = m_camera.GetViewProjectionMatrix() * worldTransform;
+        push.model = renderTransform;
+        push.mvp   = m_camera.GetViewProjectionMatrix() * renderTransform;
         push.baseColorFactor = isLightGizmo ? glm::vec4(node->lightComponent->color, 1.0f) : targetMesh->GetBaseColorFactor();
-        push.emissiveFactor  = isLightGizmo ? glm::vec4(node->lightComponent->color, node->lightComponent->intensity * 2.0f) : glm::vec4(0.0f, 0.0f, 0.0f, 1.0f);
-        push.useTexture = targetMesh->HasTexture() ? 1 : 0;
+        push.emissiveFactor  = isLightGizmo ? glm::vec4(node->lightComponent->color, std::max(2.5f, node->lightComponent->intensity * 2.0f)) : glm::vec4(0.0f, 0.0f, 0.0f, 1.0f);
+        push.useTexture = (targetMesh->HasTexture() && !isLightGizmo) ? 1 : 0;
         push.shininess = 32.0f;
-        push.specularStrength = 0.5f;
-        push.ambientStrength = 0.15f;
+        push.specularStrength = isLightGizmo ? 0.0f : 0.5f;
+        push.ambientStrength = isLightGizmo ? 1.0f : 0.15f;
 
         // 1. Shaded Solid Pass (if Off or Overlay)
         if (node->wireframeMode != WireframeMode::WireframeOnly) {
@@ -894,6 +924,7 @@ void EditorApp::Run() {
         // Start ImGui Frame
         ImGui_ImplVulkan_NewFrame();
         ImGui_ImplGlfw_NewFrame();
+        m_oracleBridge.PollEvents(ImGui::GetIO(), m_window.GetWidth(), m_window.GetHeight());
         ImGui::NewFrame();
 
         ImGuiID dockspaceID = ImGui::DockSpaceOverViewport(0, ImGui::GetMainViewport());
@@ -928,8 +959,8 @@ void EditorApp::Run() {
 
             m_nodeGraphEditorPanel->RenderUI(m_activeDisplayMesh);
             
-            // Synchronize active graph output mesh to target SceneNode
-            if (selected && selected->mesh && m_activeDisplayMesh) {
+            // Synchronize active graph output mesh to target SceneNode (excluding lights)
+            if (selected && selected->mesh && m_activeDisplayMesh && !selected->lightComponent) {
                 selected->mesh = m_activeDisplayMesh;
             }
         }
@@ -947,24 +978,15 @@ void EditorApp::Run() {
         vkResetCommandBuffer(cmd, 0);
         RecordCommandBuffer(cmd, imageIndex);
 
-        VkSubmitInfo submitInfo{};
-        submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+        Khepri::QueueSubmitDescriptor submitDesc{};
+        submitDesc.commandBuffer = cmd;
+        submitDesc.waitSemaphore = m_swapchain->GetImageAvailableSemaphore(imageIndex);
+        submitDesc.waitStageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;
+        submitDesc.signalSemaphore = m_swapchain->GetRenderFinishedSemaphore(imageIndex);
+        submitDesc.signalStageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
+        submitDesc.fence = m_swapchain->GetInFlightFence(currentFrame);
 
-        VkSemaphore waitSemaphores[] = { m_swapchain->GetImageAvailableSemaphore(imageIndex) };
-        VkPipelineStageFlags waitStages[] = { VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT };
-        submitInfo.waitSemaphoreCount = 1;
-        submitInfo.pWaitSemaphores = waitSemaphores;
-        submitInfo.pWaitDstStageMask = waitStages;
-
-        submitInfo.commandBufferCount = 1;
-        submitInfo.pCommandBuffers = &cmd;
-
-        VkSemaphore signalSemaphores[] = { m_swapchain->GetRenderFinishedSemaphore(imageIndex) };
-        submitInfo.signalSemaphoreCount = 1;
-        submitInfo.pSignalSemaphores = signalSemaphores;
-
-        VkResult submitResult = vkQueueSubmit(m_context->GetGraphicsQueue(), 1, &submitInfo,
-                                              m_swapchain->GetInFlightFence(currentFrame));
+        VkResult submitResult = m_context->GetGraphicsQueue().Submit(submitDesc);
         if (submitResult != VK_SUCCESS) {
             LOG_ERROR("Failed to submit draw command buffer! VkResult = "
                       + std::to_string(static_cast<int>(submitResult)));

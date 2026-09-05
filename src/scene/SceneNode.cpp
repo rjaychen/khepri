@@ -81,6 +81,15 @@ bool SceneNode::IsDescendantOf(const SceneNode* possibleAncestor) const {
     return false;
 }
 
+bool SceneNode::Contains(const SceneNode* target) const noexcept {
+    if (!target) return false;
+    if (target == this) return true;
+    for (const auto& child : m_children) {
+        if (child && child->Contains(target)) return true;
+    }
+    return false;
+}
+
 void SceneNode::SyncPropertiesToTransform() {
     if (m_properties.size() >= 3) {
         m_properties[0].value = position;
@@ -107,7 +116,7 @@ std::shared_ptr<khepri::graph::NodeGraph> SceneNode::GetOrCreateNodeGraph(Vulkan
             // Seed graph with an ExternalMeshNode referencing the initial mesh
             auto extNode = nodeGraph->CreateNode<khepri::graph::ExternalMeshNode>(mesh);
             (void)extNode;
-        } else if (context) {
+        } else if (context && !IsLightNode() && !lightComponent) {
             auto primNode = nodeGraph->CreateNode<khepri::graph::MeshPrimitiveNode>(context, khepri::graph::MeshPrimitiveNode::PrimitiveType::Cube);
             (void)primNode;
         }
@@ -117,7 +126,7 @@ std::shared_ptr<khepri::graph::NodeGraph> SceneNode::GetOrCreateNodeGraph(Vulkan
 }
 
 void SceneNode::EvaluateNodeGraph(bool propagateToChildren) {
-    if (nodeGraph) {
+    if (nodeGraph && !IsLightNode() && !lightComponent) {
         nodeGraph->Evaluate();
 
         // Find terminal geometry output or last produced mesh

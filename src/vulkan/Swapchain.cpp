@@ -261,7 +261,7 @@ VkResult Swapchain::Present(uint32_t imageIndex) {
     presentInfo.pSwapchains = swapChains;
     presentInfo.pImageIndices = &imageIndex;
 
-    VkResult result = vkQueuePresentKHR(m_context.GetPresentQueue(), &presentInfo);
+    VkResult result = m_context.GetPresentQueue().Present(presentInfo);
 
     m_currentFrame = (m_currentFrame + 1) % MAX_FRAMES_IN_FLIGHT;
     return result;
