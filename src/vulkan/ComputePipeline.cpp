@@ -104,10 +104,15 @@ void ComputePipeline::CreatePipeline(const std::string& shaderPath, uint32_t pus
     vkDestroyShaderModule(m_context->GetDevice(), shaderModule, nullptr);
 }
 
-void ComputePipeline::Dispatch(VkCommandBuffer cmd, uint32_t groupCountX, uint32_t groupCountY, uint32_t groupCountZ, const void* pushConstantData) {
+void ComputePipeline::Dispatch(VkCommandBuffer cmd, uint32_t groupCountX, uint32_t groupCountY, uint32_t groupCountZ,
+                               const void* pushConstantData, VkDescriptorSet descriptorSet) {
     if (m_pipeline == VK_NULL_HANDLE) return;
 
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, m_pipeline);
+
+    if (descriptorSet != VK_NULL_HANDLE) {
+        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, m_layout, 0, 1, &descriptorSet, 0, nullptr);
+    }
 
     if (m_pushConstantSize > 0 && pushConstantData != nullptr) {
         vkCmdPushConstants(cmd, m_layout, VK_SHADER_STAGE_COMPUTE_BIT, 0, m_pushConstantSize, pushConstantData);

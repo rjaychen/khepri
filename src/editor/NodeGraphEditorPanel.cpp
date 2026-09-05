@@ -244,13 +244,7 @@ void NodeGraphEditorPanel::RenderNodePropertiesInspector() {
             changed = true;
         }
     }
-    if (auto csgNode = std::dynamic_pointer_cast<CSGBooleanNode>(node)) {
-        bool applyChildren = csgNode->GetApplyToChildren();
-        if (ImGui::Checkbox("Apply to Child Objects", &applyChildren)) {
-            csgNode->SetApplyToChildren(applyChildren);
-            changed = true;
-        }
-    }
+
     if (auto floatNode = std::dynamic_pointer_cast<FloatNode>(node)) {
         float val = floatNode->GetValue();
         ImGui::Text("Float Value");
@@ -403,12 +397,7 @@ void NodeGraphEditorPanel::RenderToolbar() {
                 SelectNode(node->GetId());
                 m_graph->Evaluate();
             }
-            if (ImGui::MenuItem("CSG Boolean Node")) {
-                auto node = m_graph->CreateNode<CSGBooleanNode>(&m_context);
-                m_nodePositions[node->GetId()] = spawnPos;
-                SelectNode(node->GetId());
-                m_graph->Evaluate();
-            }
+
             ImGui::EndMenu();
         }
         if (ImGui::BeginMenu("Value Nodes")) {
@@ -584,9 +573,7 @@ void NodeGraphEditorPanel::RenderNodeCanvas() {
         float extraHeight = 0.0f;
         if (std::dynamic_pointer_cast<MeshPrimitiveNode>(node)) {
             extraHeight = 36.0f * m_zoom;
-        } else if (std::dynamic_pointer_cast<CSGBooleanNode>(node)) {
-            extraHeight = 28.0f * m_zoom;
-        }
+
 
         float nodeWidth = 240.0f * m_zoom;
         if (std::dynamic_pointer_cast<Vector3Node>(node)) {
@@ -835,10 +822,7 @@ void NodeGraphEditorPanel::RenderNodeCanvas() {
                 m_graph->Evaluate();
                 if (m_targetSceneNode) m_targetSceneNode->mesh = GetActiveOutputMesh();
             }
-        } else if (std::dynamic_pointer_cast<CSGBooleanNode>(node)) {
-            ImGui::SetCursorScreenPos(ImVec2(nodeMin.x + 10.0f * m_zoom, nodeMax.y - extraHeight + 4.0f * m_zoom));
-            ImGui::TextDisabled("CSG Boolean Op");
-        }
+
 
         ImGui::PopID();
     }
@@ -933,9 +917,7 @@ void NodeGraphEditorPanel::RenderNodeCanvas() {
             if (ImGui::MenuItem("+ Twist Deformer Node")) {
                 spawnAndConnect([&]{ return m_graph->CreateNode<TwistDeformerNode>(&m_context); });
             }
-            if (ImGui::MenuItem("+ CSG Boolean Node")) {
-                spawnAndConnect([&]{ return m_graph->CreateNode<CSGBooleanNode>(&m_context); });
-            }
+
             anyShown = true;
         }
 
@@ -1019,13 +1001,7 @@ void NodeGraphEditorPanel::RenderNodeCanvas() {
                 m_graph->Evaluate();
                 if (m_targetSceneNode) m_targetSceneNode->mesh = GetActiveOutputMesh();
             }
-            if (ImGui::MenuItem("+ CSG Boolean Node")) {
-                auto node = m_graph->CreateNode<CSGBooleanNode>(&m_context);
-                m_nodePositions[node->GetId()] = spawnCanvasPos;
-                SelectNode(node->GetId(), false);
-                m_graph->Evaluate();
-                if (m_targetSceneNode) m_targetSceneNode->mesh = GetActiveOutputMesh();
-            }
+
             ImGui::EndMenu();
         }
 

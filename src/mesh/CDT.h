@@ -17,7 +17,7 @@ struct CDT_Constraint {
  * Algorithm Overview:
  * 1. Projects 3D planar polygons onto principal 2D basis vectors (u, v).
  * 2. Triangulates 2D point set using Bowyer-Watson incremental Delaunay insertion
- *    with Shewchuk exact floating-point predicates (InCircle2D).
+ *    with fast near-exact floating-point predicates (GeometricPredicates::InCircle2D).
  * 3. Re-projects generated 2D Delaunay triangles back into 3D mesh vertices.
  *
  * Implementation Note:

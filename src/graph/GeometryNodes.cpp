@@ -1,5 +1,4 @@
 #include "GeometryNodes.h"
-#include "../mesh/MeshBoolean.h"
 #include "../core/Logger.h"
 
 namespace khepri::graph {
@@ -145,53 +144,6 @@ void TwistDeformerNode::Evaluate() {
 
     if (s_enableGraphLogging) {
         LOG_INFO("Evaluated TwistDeformerNode " + std::to_string(m_id) + " with angle " + std::to_string(m_angle));
-    }
-}
-
-CSGBooleanNode::CSGBooleanNode(uint32_t id, VulkanContext* context, OpType op) noexcept
-    : GraphNode(id, "CSG Boolean", NodeDomain::Geometry), m_context(context), m_opType(op) {
-    AddInput("Mesh A", PinType::GeometryBuffer);
-    AddInput("Mesh B", PinType::GeometryBuffer);
-    AddOutput("ResultMesh", PinType::GeometryBuffer);
-}
-
-void CSGBooleanNode::Evaluate() {
-    std::shared_ptr<MeshComponent> meshA = nullptr;
-    std::shared_ptr<MeshComponent> meshB = nullptr;
-
-    const auto* pinA = FindInput("Mesh A");
-    if (pinA && std::holds_alternative<std::shared_ptr<MeshComponent>>(pinA->value)) {
-        meshA = std::get<std::shared_ptr<MeshComponent>>(pinA->value);
-    }
-    const auto* pinB = FindInput("Mesh B");
-    if (pinB && std::holds_alternative<std::shared_ptr<MeshComponent>>(pinB->value)) {
-        meshB = std::get<std::shared_ptr<MeshComponent>>(pinB->value);
-    }
-
-    if (!m_context) {
-        m_outputMesh = meshA ? meshA : (meshB ? meshB : nullptr);
-        auto* outPin = FindOutput("ResultMesh");
-        if (outPin) outPin->value = m_outputMesh;
-        if (s_enableGraphLogging) LOG_INFO("Evaluated CSGBooleanNode " + std::to_string(m_id) + " (Headless null context)");
-        return;
-    }
-
-    if (!meshA) {
-        meshA = MeshComponent::CreateCube(m_context, 2.0f);
-    }
-    if (!meshB) {
-        meshB = MeshComponent::CreateSphere(m_context, 1.2f, 32, 16);
-    }
-
-    const BooleanOp op = (m_opType == OpType::Union) ? BooleanOp::Union :
-                         (m_opType == OpType::Intersection) ? BooleanOp::Intersection : BooleanOp::Difference;
-
-    m_outputMesh = MeshBoolean::PerformBoolean(*m_context, *meshA, *meshB, op);
-    auto* outPin = FindOutput("ResultMesh");
-    if (outPin) outPin->value = m_outputMesh;
-
-    if (s_enableGraphLogging) {
-        LOG_INFO("Evaluated CSGBooleanNode " + std::to_string(m_id));
     }
 }
 

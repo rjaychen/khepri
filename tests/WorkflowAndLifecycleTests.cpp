@@ -12,84 +12,8 @@
 using namespace khepri::graph;
 
 // ---------------------------------------------------------------------------
-// 1. Node Graph Multi-Node & CSG Dataflow Oracles
+// 1. Node Graph Topological Ordering
 // ---------------------------------------------------------------------------
-
-TEST(WorkflowAndLifecycleTest, CSGBooleanMultiInputDataflow) {
-    NodeGraph graph;
-    VulkanContext* nullContext = nullptr;
-
-    // Create 2 source geometry nodes
-    Vertex vA0{}; vA0.position = {-1.0f, -1.0f, 0.0f}; vA0.normal = {0.0f, 0.0f, 1.0f}; vA0.uv = {0.0f, 0.0f};
-    Vertex vA1{}; vA1.position = { 1.0f, -1.0f, 0.0f}; vA1.normal = {0.0f, 0.0f, 1.0f}; vA1.uv = {1.0f, 0.0f};
-    Vertex vA2{}; vA2.position = { 0.0f,  1.0f, 0.0f}; vA2.normal = {0.0f, 0.0f, 1.0f}; vA2.uv = {0.5f, 1.0f};
-    std::vector<Vertex> vertsA = {vA0, vA1, vA2};
-    std::vector<uint32_t> indicesA = {0, 1, 2};
-    auto meshA = std::make_shared<MeshComponent>(nullContext, vertsA, indicesA);
-
-    Vertex vB0{}; vB0.position = {-0.5f, -0.5f, 0.5f}; vB0.normal = {0.0f, 0.0f, 1.0f}; vB0.uv = {0.0f, 0.0f};
-    Vertex vB1{}; vB1.position = { 0.5f, -0.5f, 0.5f}; vB1.normal = {0.0f, 0.0f, 1.0f}; vB1.uv = {1.0f, 0.0f};
-    Vertex vB2{}; vB2.position = { 0.0f,  0.5f, 0.5f}; vB2.normal = {0.0f, 0.0f, 1.0f}; vB2.uv = {0.5f, 1.0f};
-    std::vector<Vertex> vertsB = {vB0, vB1, vB2};
-    std::vector<uint32_t> indicesB = {0, 1, 2};
-    auto meshB = std::make_shared<MeshComponent>(nullContext, vertsB, indicesB);
-
-    auto nodeA = graph.CreateNode<ExternalMeshNode>(meshA);
-    auto nodeB = graph.CreateNode<ExternalMeshNode>(meshB);
-    auto csgNode = graph.CreateNode<CSGBooleanNode>(nullContext, CSGBooleanNode::OpType::Union);
-
-    ASSERT_NE(nodeA, nullptr);
-    ASSERT_NE(nodeB, nullptr);
-    ASSERT_NE(csgNode, nullptr);
-
-    // Connect nodeA -> csgNode (Mesh A) and nodeB -> csgNode (Mesh B)
-    const auto* outPinA = nodeA->FindOutput("MeshBuffer");
-    const auto* outPinB = nodeB->FindOutput("MeshBuffer");
-    const auto* inPinA = csgNode->FindInput("Mesh A");
-    const auto* inPinB = csgNode->FindInput("Mesh B");
-
-    ASSERT_NE(outPinA, nullptr);
-    ASSERT_NE(outPinB, nullptr);
-    ASSERT_NE(inPinA, nullptr);
-    ASSERT_NE(inPinB, nullptr);
-
-    EXPECT_TRUE(graph.Connect(outPinA->id, inPinA->id));
-    EXPECT_TRUE(graph.Connect(outPinB->id, inPinB->id));
-
-    // Evaluate entire graph
-    graph.Evaluate();
-
-    // Verify csgNode received input values and assigned its result output pin
-    const auto* resultPin = csgNode->FindOutput("ResultMesh");
-    ASSERT_NE(resultPin, nullptr);
-    EXPECT_TRUE(std::holds_alternative<std::shared_ptr<MeshComponent>>(resultPin->value));
-    auto outputMesh = std::get<std::shared_ptr<MeshComponent>>(resultPin->value);
-    EXPECT_NE(outputMesh, nullptr);
-}
-
-TEST(WorkflowAndLifecycleTest, CSGBooleanDisconnectedInputFallback) {
-    NodeGraph graph;
-    VulkanContext* nullContext = nullptr;
-
-    // csgNode with disconnected inputs in headless mode
-    auto csgNode = graph.CreateNode<CSGBooleanNode>(nullContext, CSGBooleanNode::OpType::Intersection);
-    ASSERT_NE(csgNode, nullptr);
-
-    // Evaluate without throwing or crashing
-    EXPECT_NO_THROW(graph.Evaluate());
-    EXPECT_FALSE(csgNode->IsDirty());
-}
-
-TEST(WorkflowAndLifecycleTest, CSGBooleanOpTypeMutationMarksDirty) {
-    NodeGraph graph;
-    auto csgNode = graph.CreateNode<CSGBooleanNode>(nullptr, CSGBooleanNode::OpType::Union);
-    graph.Evaluate();
-    EXPECT_FALSE(csgNode->IsDirty());
-
-    csgNode->SetOpType(CSGBooleanNode::OpType::Difference);
-    EXPECT_EQ(csgNode->GetOpType(), CSGBooleanNode::OpType::Difference);
-    EXPECT_TRUE(csgNode->IsDirty());
-}
 
 TEST(WorkflowAndLifecycleTest, ParallelBranchTopologicalOrdering) {
     NodeGraph graph;

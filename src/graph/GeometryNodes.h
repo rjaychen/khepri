@@ -117,28 +117,6 @@ private:
     std::shared_ptr<MeshComponent> m_outputMesh{nullptr};
 };
 
-// Subsumes CSG Boolean operations into a procedural node
-class CSGBooleanNode : public GraphNode {
-public:
-    enum class OpType { Union, Intersection, Difference };
-
-    CSGBooleanNode(uint32_t id, VulkanContext* context = nullptr, OpType op = OpType::Union) noexcept;
-
-    void Evaluate() override;
-
-    [[nodiscard]] OpType GetOpType() const noexcept { return m_opType; }
-    void SetOpType(OpType op) noexcept { m_opType = op; MarkDirty(); }
-    [[nodiscard]] std::shared_ptr<MeshComponent> GetOutputMesh() const noexcept override { return m_outputMesh; }
-    [[nodiscard]] bool GetApplyToChildren() const noexcept { return m_applyToChildren; }
-    void SetApplyToChildren(bool apply) noexcept { m_applyToChildren = apply; MarkDirty(); }
-
-private:
-    VulkanContext* m_context{nullptr};
-    OpType m_opType;
-    bool m_applyToChildren{false};
-    std::shared_ptr<MeshComponent> m_outputMesh{nullptr};
-};
-
 // Outputs a scalar float value for procedural node parameters
 class FloatNode : public GraphNode {
 public:

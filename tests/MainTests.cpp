@@ -7,7 +7,7 @@
 #include "scene/SceneNode.h"
 #include "scene/LightComponent.h"
 #include "animation/Timeline.h"
-#include "mesh/ExactPredicates.h"
+#include "mesh/GeometricPredicates.h"
 #include "mesh/HalfEdgeMesh.h"
 #include "vulkan/Pipeline.h"
 
@@ -176,14 +176,14 @@ TEST(AnimationTimelineTest, PlaybackStateControls) {
 // ---------------------------------------------------------------------------
 // 4. Computational Geometry Predicates Test Suite
 // ---------------------------------------------------------------------------
-TEST(ExactPredicatesTest, RobustOrientationPredicate) {
+TEST(GeometricPredicatesTest, OrientationPredicate) {
     glm::vec2 a(0.0f, 0.0f);
     glm::vec2 b(1.0f, 0.0f);
     glm::vec2 c_left(0.5f, 1.0f);
     glm::vec2 c_right(0.5f, -1.0f);
 
-    EXPECT_GT(ExactPredicates::Orient2D(a, b, c_left), 0.0f);  // Counter-clockwise (Left)
-    EXPECT_LT(ExactPredicates::Orient2D(a, b, c_right), 0.0f); // Clockwise (Right)
+    EXPECT_GT(GeometricPredicates::Orient2D(a, b, c_left), 0.0f);  // Counter-clockwise (Left)
+    EXPECT_LT(GeometricPredicates::Orient2D(a, b, c_right), 0.0f); // Clockwise (Right)
 }
 
 // ---------------------------------------------------------------------------

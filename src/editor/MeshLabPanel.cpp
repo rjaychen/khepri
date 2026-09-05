@@ -1,6 +1,5 @@
 #include "MeshLabPanel.h"
 #include "../mesh/CDT.h"
-#include "../mesh/MeshBoolean.h"
 #include "../core/Logger.h"
 
 MeshLabPanel::MeshLabPanel(VulkanContext& context)
@@ -39,27 +38,8 @@ void MeshLabPanel::RenderUI(std::shared_ptr<MeshComponent>& activeDisplayMesh) {
         }
     }
 
-    // Section 2: CSG Mesh Booleans
-    if (ImGui::CollapsingHeader("2. Constructive Solid Geometry (CSG Booleans)", ImGuiTreeNodeFlags_DefaultOpen)) {
-        ImGui::TextWrapped("Performs CSG operations between Mesh A (Cube) and Mesh B (Sphere).");
-        ImGui::RadioButton("Union (A ∪ B)", &m_booleanOp, 0); ImGui::SameLine();
-        ImGui::RadioButton("Intersection (A ∩ B)", &m_booleanOp, 1); ImGui::SameLine();
-        ImGui::RadioButton("Difference (A \\ B)", &m_booleanOp, 2);
-
-        if (ImGui::Button("Execute CSG Boolean Operation")) {
-            auto cube = MeshComponent::CreateCube(m_context, 2.0f);
-            auto sphere = MeshComponent::CreateSphere(m_context, 1.2f, 32, 16);
-            BooleanOp op = (m_booleanOp == 0) ? BooleanOp::Union :
-                           (m_booleanOp == 1) ? BooleanOp::Intersection : BooleanOp::Difference;
-            activeDisplayMesh = MeshBoolean::PerformBoolean(m_context, *cube, *sphere, op);
-            if (activeDisplayMesh) {
-                m_authoringMesh.BuildFromIndexedMesh(activeDisplayMesh->GetVertices(), activeDisplayMesh->GetIndices());
-            }
-        }
-    }
-
-    // Section 3: Data-Oriented Mesh Baking (Phase 2)
-    if (ImGui::CollapsingHeader("3. Data-Oriented Mesh Baking", ImGuiTreeNodeFlags_DefaultOpen)) {
+    // Section 2: Data-Oriented Mesh Baking
+    if (ImGui::CollapsingHeader("2. Data-Oriented Mesh Baking", ImGuiTreeNodeFlags_DefaultOpen)) {
         ImGui::TextWrapped("Flattens index-based HalfEdgeMesh topology into Vulkan Render Mesh buffers.");
         if (ImGui::Button("Bake Authoring Mesh to Render Buffers")) {
             if (m_authoringMesh.GetVertices().empty() && activeDisplayMesh) {

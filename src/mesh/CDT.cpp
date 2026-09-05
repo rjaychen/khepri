@@ -1,5 +1,5 @@
 #include "CDT.h"
-#include "ExactPredicates.h"
+#include "GeometricPredicates.h"
 #include "../core/Logger.h"
 #include <algorithm>
 #include <set>
@@ -48,7 +48,7 @@ void CDT::Triangulate2D(const std::vector<glm::vec2>& points,
         std::vector<CDT_Triangle> badTriangles;
 
         for (const auto& tri : triangles) {
-            if (ExactPredicates::InCircle2D(superPts[tri.p0], superPts[tri.p1], superPts[tri.p2], p) > 0.0) {
+            if (GeometricPredicates::InCircle2D(superPts[tri.p0], superPts[tri.p1], superPts[tri.p2], p) > 0.0) {
                 badTriangles.push_back(tri);
             }
         }

@@ -15,7 +15,7 @@ public:
     ComputePipeline(const ComputePipeline&) = delete;
     ComputePipeline& operator=(const ComputePipeline&) = delete;
 
-    void Dispatch(VkCommandBuffer cmd, uint32_t groupCountX, uint32_t groupCountY, uint32_t groupCountZ, const void* pushConstantData = nullptr);
+    void Dispatch(VkCommandBuffer cmd, uint32_t groupCountX, uint32_t groupCountY, uint32_t groupCountZ, const void* pushConstantData = nullptr, VkDescriptorSet descriptorSet = VK_NULL_HANDLE);
 
     VkPipeline GetPipeline() const { return m_pipeline; }
     VkPipelineLayout GetLayout() const { return m_layout; }

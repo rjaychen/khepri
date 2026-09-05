@@ -225,18 +225,14 @@ TEST(NodeGraphEditorUITest, GroupDeformationPropagationFlag) {
     VulkanContext context(nullptr);
     TwistDeformerNode twist(1, &context);
     SubdivisionNode subdiv(2, &context, 2);
-    CSGBooleanNode csg(3, &context);
 
     EXPECT_FALSE(twist.GetApplyToChildren());
     EXPECT_FALSE(subdiv.GetApplyToChildren());
-    EXPECT_FALSE(csg.GetApplyToChildren());
 
     twist.SetApplyToChildren(true);
     subdiv.SetApplyToChildren(true);
-    csg.SetApplyToChildren(true);
 
     EXPECT_TRUE(twist.GetApplyToChildren());
     EXPECT_TRUE(subdiv.GetApplyToChildren());
-    EXPECT_TRUE(csg.GetApplyToChildren());
 }
 
