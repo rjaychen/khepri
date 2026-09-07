@@ -1,0 +1,9 @@
+{
+  "name": "SampleScene",
+  "version": 1,
+  "nodes": [
+    { "name": "Main Camera", "position": [0, 2, 5], "target": [0, 0, 0] },
+    { "name": "Sun Light", "type": "directional", "direction": [-0.577, -0.577, -0.577], "color": [1.0, 0.95, 0.85], "intensity": 3.0 },
+    { "name": "Demo Cylinder", "type": "mesh", "primitive": "cylinder" }
+  ]
+}

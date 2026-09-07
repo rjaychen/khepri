@@ -1,0 +1,7 @@
+{
+  "name": "PolishedSilver",
+  "baseColor": [0.972, 0.960, 0.915, 1.0],
+  "roughness": 0.08,
+  "metallic": 0.95,
+  "emissive": [0.0, 0.0, 0.0, 1.0]
+}

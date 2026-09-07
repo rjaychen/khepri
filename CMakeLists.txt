@@ -62,7 +62,7 @@ FetchContent_MakeAvailable(volk)
 message(STATUS "Fetching VulkanMemoryAllocator...")
 FetchContent_Declare(
     vma
-    URL https://github.com/GPUOpen-LibrariesAndSDKs/VulkanMemoryAllocator/archive/refs/heads/master.zip
+    URL https://github.com/GPUOpen-LibrariesAndSDKs/VulkanMemoryAllocator/archive/refs/tags/v3.1.0.zip
 )
 FetchContent_MakeAvailable(vma)
 
@@ -288,6 +288,13 @@ if(TARGET Shaders)
     )
 endif()
 
+add_custom_command(TARGET KhepriEngine POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+        "${CMAKE_CURRENT_SOURCE_DIR}/assets"
+        "$<TARGET_FILE_DIR:KhepriEngine>/assets"
+    COMMENT "Copying assets to output executable directory"
+)
+
 # -------------------------------------------------------
 # 4. Unit Testing Framework (GoogleTest)
 # -------------------------------------------------------
@@ -310,6 +317,12 @@ if(BUILD_TESTS)
 
     # Editor sources needed for UI and Gizmo/ViewCube tests
     set(TEST_ADDITIONAL_SOURCES
+        src/editor/Theme.cpp
+        src/editor/Theme.h
+        src/editor/UIWidgets.cpp
+        src/editor/UIWidgets.h
+        src/editor/ThumbnailCache.cpp
+        src/editor/ThumbnailCache.h
         src/editor/NodeGraphEditorPanel.cpp
         src/editor/NodeGraphEditorPanel.h
         src/editor/TransformGizmo.cpp
@@ -318,8 +331,12 @@ if(BUILD_TESTS)
         src/editor/ViewCube.h
         src/editor/LightVisualizer.cpp
         src/editor/LightVisualizer.h
+        src/editor/VectorIcons.cpp
+        src/editor/VectorIcons.h
         src/editor/SceneTreePanel.cpp
         src/editor/SceneTreePanel.h
+        src/editor/AssetManagerPanel.cpp
+        src/editor/AssetManagerPanel.h
     )
 
     add_executable(KhepriEngineTests
@@ -349,6 +366,13 @@ if(BUILD_TESTS)
     if(MSVC)
         target_compile_options(KhepriEngineTests PRIVATE /W4 /utf-8 /FS)
     endif()
+
+    add_custom_command(TARGET KhepriEngineTests POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+            "${CMAKE_CURRENT_SOURCE_DIR}/assets"
+            "$<TARGET_FILE_DIR:KhepriEngineTests>/assets"
+        COMMENT "Copying assets to test executable directory"
+    )
 
     include(GoogleTest)
     gtest_discover_tests(KhepriEngineTests)

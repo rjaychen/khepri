@@ -105,4 +105,9 @@ private:
 
     VkSampler m_sampler = VK_NULL_HANDLE;
     std::function<void(const std::string&)> m_onImportModel;
+
+    ImVec2 m_clickStartPos{0.0f, 0.0f};
+    bool m_isPotentialClick = false;
+
+    SceneNode* RaycastScene(const Camera& camera, const SceneNode* rootNode, const glm::vec2& mousePos, const glm::vec2& viewportPos, const glm::vec2& viewportSize);
 };
