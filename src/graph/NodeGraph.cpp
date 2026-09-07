@@ -122,35 +122,35 @@ const GraphPin* NodeGraph::FindPin(uint32_t pinId) const noexcept {
     return nullptr;
 }
 
+void NodeGraph::RebuildAdjacency() const {
+    m_adj.clear();
+    for (const auto& [nodeId, node] : m_nodes) {
+        if (!node) continue;
+        for (const auto& inPin : node->GetInputs()) {
+            if (inPin.connectedPinId != 0) {
+                const GraphPin* outPin = FindPin(inPin.connectedPinId);
+                if (outPin && outPin->nodeId != nodeId) {
+                    m_adj[outPin->nodeId].insert(nodeId);
+                }
+            }
+        }
+    }
+}
+
 bool NodeGraph::HasPath(uint32_t startNodeId, uint32_t targetNodeId) const noexcept {
     if (startNodeId == targetNodeId) return true;
 
-    std::queue<uint32_t> q;
-    std::unordered_set<uint32_t> visited;
-
-    q.push(startNodeId);
-    visited.insert(startNodeId);
-
+    std::vector<uint32_t> q = { startNodeId };
+    std::unordered_set<uint32_t> visited = { startNodeId };
     while (!q.empty()) {
-        const uint32_t curr = q.front();
-        q.pop();
-
-        if (curr == targetNodeId) return true;
-
-        auto node = GetNode(curr);
-        if (!node) continue;
-
-        for (const auto& outPin : node->GetOutputs()) {
-            for (const auto& [otherId, otherNode] : m_nodes) {
-                if (!otherNode) continue;
-                for (const auto& inPin : otherNode->GetInputs()) {
-                    if (inPin.connectedPinId == outPin.id) {
-                        if (otherId == targetNodeId) return true;
-                        if (visited.find(otherId) == visited.end()) {
-                            visited.insert(otherId);
-                            q.push(otherId);
-                        }
-                    }
+        const uint32_t node = q.back();
+        q.pop_back();
+        auto it = m_adj.find(node);
+        if (it != m_adj.end()) {
+            for (const uint32_t next : it->second) {
+                if (next == targetNodeId) return true;
+                if (visited.insert(next).second) {
+                    q.push_back(next);
                 }
             }
         }
@@ -159,23 +159,31 @@ bool NodeGraph::HasPath(uint32_t startNodeId, uint32_t targetNodeId) const noexc
     return false;
 }
 
-bool NodeGraph::Connect(uint32_t outputPinId, uint32_t inputPinId) {
+std::expected<void, ConnectError> NodeGraph::Connect(uint32_t outputPinId, uint32_t inputPinId) {
     GraphPin* outPin = FindPin(outputPinId);
     GraphPin* inPin = FindPin(inputPinId);
 
-    if (!outPin || !inPin) return false;
-    if (outPin->direction != PinDirection::Output || inPin->direction != PinDirection::Input) return false;
-    if (outPin->type != inPin->type) return false;
-    if (outPin->nodeId == inPin->nodeId) return false;
+    if (!outPin || !inPin) return std::unexpected(ConnectError::PinNotFound);
+    if (outPin->direction != PinDirection::Output || inPin->direction != PinDirection::Input)
+        return std::unexpected(ConnectError::InvalidDirection);
+    if (outPin->type != inPin->type)
+        return std::unexpected(ConnectError::TypeMismatch);
+    if (outPin->nodeId == inPin->nodeId)
+        return std::unexpected(ConnectError::SameNodeSelfLoop);
 
     // Cycle prevention: if input pin's node can reach output pin's node, connecting would form a cycle
     if (HasPath(inPin->nodeId, outPin->nodeId)) {
-        return false;
+        return std::unexpected(ConnectError::CycleDetected);
+    }
+
+    if (inPin->connectedPinId != 0) {
+        Disconnect(inPin->id);
     }
 
     inPin->connectedPinId = outputPinId;
+    m_adj[outPin->nodeId].insert(inPin->nodeId);
     MarkNodeDirty(inPin->nodeId);
-    return true;
+    return {};
 }
 
 bool NodeGraph::Disconnect(uint32_t inputPinId) {
@@ -183,7 +191,34 @@ bool NodeGraph::Disconnect(uint32_t inputPinId) {
     if (!inPin || inPin->direction != PinDirection::Input) return false;
 
     if (inPin->connectedPinId != 0) {
+        const GraphPin* outPin = FindPin(inPin->connectedPinId);
+        const uint32_t outNodeId = outPin ? outPin->nodeId : 0;
+        const uint32_t inNodeId = inPin->nodeId;
+
         inPin->connectedPinId = 0;
+
+        if (outNodeId != 0) {
+            auto inNode = GetNode(inNodeId);
+            bool stillConnected = false;
+            if (inNode) {
+                for (const auto& pin : inNode->GetInputs()) {
+                    if (pin.connectedPinId != 0) {
+                        const GraphPin* otherOutPin = FindPin(pin.connectedPinId);
+                        if (otherOutPin && otherOutPin->nodeId == outNodeId) {
+                            stillConnected = true;
+                            break;
+                        }
+                    }
+                }
+            }
+            if (!stillConnected) {
+                auto it = m_adj.find(outNodeId);
+                if (it != m_adj.end()) {
+                    it->second.erase(inNodeId);
+                }
+            }
+        }
+
         MarkNodeDirty(inPin->nodeId);
         return true;
     }
@@ -199,11 +234,13 @@ bool NodeGraph::RemoveNode(uint32_t nodeId) {
         Disconnect(pin.id);
     }
     for (auto& [otherId, node] : m_nodes) {
-        if (otherId == nodeId) continue;
+        if (otherId == nodeId || !node) continue;
         for (auto& pin : node->GetInputs()) {
-            for (const auto& outPin : nodeToRemove->GetOutputs()) {
-                if (pin.connectedPinId == outPin.id) {
-                    Disconnect(pin.id);
+            if (pin.connectedPinId != 0) {
+                for (const auto& outPin : nodeToRemove->GetOutputs()) {
+                    if (pin.connectedPinId == outPin.id) {
+                        Disconnect(pin.id);
+                    }
                 }
             }
         }
@@ -216,8 +253,23 @@ bool NodeGraph::RemoveNode(uint32_t nodeId) {
         m_pinMap.erase(pin.id);
     }
 
+    m_adj.erase(nodeId);
+    for (auto& [_, consumers] : m_adj) {
+        consumers.erase(nodeId);
+    }
+
     m_nodes.erase(it);
     return true;
+}
+
+void NodeGraph::RestoreNode(std::shared_ptr<GraphNode> node) {
+    if (!node) return;
+    const uint32_t id = node->GetId();
+    node->SetGraph(this);
+    RegisterNodePins(*node);
+    m_nodes[id] = node;
+    node->MarkDirty();
+    RebuildAdjacency();
 }
 
 std::shared_ptr<GraphNode> NodeGraph::GetNode(uint32_t id) const noexcept {
@@ -234,15 +286,12 @@ void NodeGraph::MarkNodeDirty(uint32_t nodeId) {
         node->MarkDirty();
     }
 
-    for (const auto& outPin : node->GetOutputs()) {
-        for (auto& [otherId, otherNode] : m_nodes) {
-            if (otherId == nodeId || !otherNode) continue;
-            for (const auto& inPin : otherNode->GetInputs()) {
-                if (inPin.connectedPinId == outPin.id) {
-                    if (!otherNode->IsDirty()) {
-                        otherNode->MarkDirty();
-                    }
-                }
+    auto it = m_adj.find(nodeId);
+    if (it != m_adj.end()) {
+        for (uint32_t consumer : it->second) {
+            auto consumerNode = GetNode(consumer);
+            if (consumerNode && !consumerNode->IsDirty()) {
+                consumerNode->MarkDirty();
             }
         }
     }
@@ -250,22 +299,15 @@ void NodeGraph::MarkNodeDirty(uint32_t nodeId) {
 
 std::vector<std::shared_ptr<GraphNode>> NodeGraph::TopologicalSort() const {
     std::vector<std::shared_ptr<GraphNode>> result;
-    std::unordered_map<uint32_t, int> inDegree;
-    std::unordered_map<uint32_t, std::vector<uint32_t>> adj;
+    std::unordered_map<uint32_t, size_t> inDegree;
 
-    for (const auto& [id, node] : m_nodes) {
+    for (const auto& [id, _] : m_nodes) {
         inDegree[id] = 0;
     }
 
-    for (const auto& [id, node] : m_nodes) {
-        for (const auto& inPin : node->GetInputs()) {
-            if (inPin.connectedPinId != 0) {
-                const GraphPin* outPin = FindPin(inPin.connectedPinId);
-                if (outPin) {
-                    adj[outPin->nodeId].push_back(id);
-                    inDegree[id]++;
-                }
-            }
+    for (const auto& [nodeId, consumers] : m_adj) {
+        for (uint32_t consumer : consumers) {
+            inDegree[consumer]++;
         }
     }
 
@@ -277,16 +319,18 @@ std::vector<std::shared_ptr<GraphNode>> NodeGraph::TopologicalSort() const {
     while (!q.empty()) {
         const uint32_t u = q.front();
         q.pop();
-        if (m_nodes.count(u)) {
+        if (m_nodes.count(u) && m_nodes.at(u)) {
             result.push_back(m_nodes.at(u));
         }
 
-        auto it = adj.find(u);
-        if (it != adj.end()) {
+        auto it = m_adj.find(u);
+        if (it != m_adj.end()) {
             for (const uint32_t v : it->second) {
-                inDegree[v]--;
-                if (inDegree[v] == 0) {
-                    q.push(v);
+                if (inDegree[v] > 0) {
+                    inDegree[v]--;
+                    if (inDegree[v] == 0) {
+                        q.push(v);
+                    }
                 }
             }
         }

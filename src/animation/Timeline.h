@@ -30,6 +30,9 @@ struct AnimationTrack {
     glm::vec3 SamplePosition(float time) const;
     glm::quat SampleRotation(float time) const;
     glm::vec3 SampleScale(float time) const;
+
+    template<typename T>
+    T Sample(float time) const;
 };
 
 struct AnimationClip {
@@ -39,9 +42,12 @@ struct AnimationClip {
     std::vector<AnimationTrack> tracks;
 
     AnimationTrack* GetOrCreateTrack(const std::string& targetNodeName);
-    void AddOrUpdatePositionKey(const std::string& targetNodeName, float time, const glm::vec3& position);
-    void AddOrUpdateRotationKey(const std::string& targetNodeName, float time, const glm::quat& rotation);
-    void AddOrUpdateScaleKey(const std::string& targetNodeName, float time, const glm::vec3& scale);
+    void AddOrUpdatePositionKey(const std::string& targetNodeName, float time, const glm::vec3& position, InterpolationMode mode = InterpolationMode::Linear);
+    void AddOrUpdateRotationKey(const std::string& targetNodeName, float time, const glm::quat& rotation, InterpolationMode mode = InterpolationMode::Linear);
+    void AddOrUpdateScaleKey(const std::string& targetNodeName, float time, const glm::vec3& scale, InterpolationMode mode = InterpolationMode::Linear);
+
+    template<typename T>
+    void AddOrUpdateKey(const std::string& targetNodeName, float time, const T& value, InterpolationMode mode = InterpolationMode::Linear);
 };
 
 class Timeline {

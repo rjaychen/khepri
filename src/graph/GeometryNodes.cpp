@@ -53,14 +53,20 @@ SubdivisionNode::SubdivisionNode(uint32_t id, VulkanContext* context, uint32_t l
 
 void SubdivisionNode::Evaluate() {
     const auto* lvlPin = FindInput("Level");
-    if (lvlPin && std::holds_alternative<float>(lvlPin->value)) {
-        m_levels = static_cast<uint32_t>(std::max(0.0f, std::get<float>(lvlPin->value)));
+    if (lvlPin) {
+        std::visit(OverloadedVisitor{
+            [this](float val) { m_levels = static_cast<uint32_t>(std::max(0.0f, val)); },
+            [](auto&&) {}
+        }, lvlPin->value);
     }
 
     std::shared_ptr<MeshComponent> inputMesh = nullptr;
     const auto* inMeshPin = FindInput("MeshBuffer");
-    if (inMeshPin && std::holds_alternative<std::shared_ptr<MeshComponent>>(inMeshPin->value)) {
-        inputMesh = std::get<std::shared_ptr<MeshComponent>>(inMeshPin->value);
+    if (inMeshPin) {
+        std::visit(OverloadedVisitor{
+            [&inputMesh](const std::shared_ptr<MeshComponent>& mesh) { inputMesh = mesh; },
+            [](auto&&) {}
+        }, inMeshPin->value);
     }
 
     if (!inputMesh) {
@@ -86,14 +92,20 @@ TwistDeformerNode::TwistDeformerNode(uint32_t id, VulkanContext* context) noexce
 
 void TwistDeformerNode::Evaluate() {
     const auto* anglePin = FindInput("Angle");
-    if (anglePin && std::holds_alternative<float>(anglePin->value)) {
-        m_angle = std::get<float>(anglePin->value);
+    if (anglePin) {
+        std::visit(OverloadedVisitor{
+            [this](float val) { m_angle = val; },
+            [](auto&&) {}
+        }, anglePin->value);
     }
 
     std::shared_ptr<MeshComponent> inputMesh = nullptr;
     const auto* inMeshPin = FindInput("MeshBuffer");
-    if (inMeshPin && std::holds_alternative<std::shared_ptr<MeshComponent>>(inMeshPin->value)) {
-        inputMesh = std::get<std::shared_ptr<MeshComponent>>(inMeshPin->value);
+    if (inMeshPin) {
+        std::visit(OverloadedVisitor{
+            [&inputMesh](const std::shared_ptr<MeshComponent>& mesh) { inputMesh = mesh; },
+            [](auto&&) {}
+        }, inMeshPin->value);
     }
 
     if (!inputMesh) {
@@ -149,7 +161,8 @@ void TwistDeformerNode::Evaluate() {
 
 FloatNode::FloatNode(uint32_t id, float initialValue) noexcept
     : GraphNode(id, "Float Value", NodeDomain::Geometry), m_value(initialValue) {
-    AddOutput("Value", PinType::Float);
+    auto& pin = AddOutput("Value", PinType::Float);
+    pin.value = initialValue;
 }
 
 void FloatNode::Evaluate() {
@@ -162,7 +175,8 @@ void FloatNode::Evaluate() {
 
 Vector3Node::Vector3Node(uint32_t id, const glm::vec3& initialValue) noexcept
     : GraphNode(id, "Vector3 Value", NodeDomain::Geometry), m_value(initialValue) {
-    AddOutput("Value", PinType::Vector3);
+    auto& pin = AddOutput("Value", PinType::Vector3);
+    pin.value = initialValue;
 }
 
 void Vector3Node::Evaluate() {

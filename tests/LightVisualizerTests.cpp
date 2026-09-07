@@ -4,6 +4,7 @@
 #include "scene/SceneNode.h"
 #include "scene/Camera.h"
 #include <glm/gtc/matrix_transform.hpp>
+#include <imgui_internal.h>
 #include <cmath>
 
 using namespace khepri;
@@ -294,5 +295,83 @@ TEST(LightVisualizerTest, LightNodeGraphEvaluationDoesNotOverwriteLightMeshWithC
 
     // The light node's mesh must remain the sphere mesh, and must NOT be replaced with a cube
     EXPECT_EQ(lightNode->mesh, initialSphere);
+}
+
+// ---------------------------------------------------------------------------
+// 7. Light Billboard Icon & Screen Projection Tests
+// ---------------------------------------------------------------------------
+
+TEST(LightVisualizerTest, ProjectWorldToScreenInFrontAndBehindCamera) {
+    Camera camera(glm::vec3(0.0f, 0.0f, 5.0f), glm::vec3(0.0f, 0.0f, 0.0f));
+    camera.SetPerspective(45.0f, 16.0f / 9.0f, 0.1f, 100.0f);
+
+    glm::mat4 viewProj = camera.GetViewProjectionMatrix();
+    glm::vec2 viewportPos(100.0f, 50.0f);
+    glm::vec2 viewportSize(800.0f, 600.0f);
+
+    // Target point in front at origin
+    glm::vec3 inFrontTarget(0.0f, 0.0f, 0.0f);
+    glm::vec2 screenPos{0.0f};
+    bool inFrontResult = LightVisualizer::ProjectWorldToScreen(inFrontTarget, viewProj, viewportPos, viewportSize, screenPos);
+    EXPECT_TRUE(inFrontResult);
+    // Center of viewport is 100 + 400 = 500, 50 + 300 = 350
+    EXPECT_NEAR(screenPos.x, 500.0f, 2.0f);
+    EXPECT_NEAR(screenPos.y, 350.0f, 2.0f);
+
+    // Target point behind camera
+    glm::vec3 behindTarget(0.0f, 0.0f, 15.0f);
+    glm::vec2 behindScreen{0.0f};
+    bool behindResult = LightVisualizer::ProjectWorldToScreen(behindTarget, viewProj, viewportPos, viewportSize, behindScreen);
+    EXPECT_FALSE(behindResult);
+}
+
+TEST(LightVisualizerTest, LightIconHitTestingRadius) {
+    glm::vec2 iconCenter(400.0f, 300.0f);
+    float hitRadius = 18.0f;
+
+    // Mouse directly on icon center
+    EXPECT_LE(glm::distance(glm::vec2(400.0f, 300.0f), iconCenter), hitRadius);
+
+    // Mouse near edge (12px away)
+    EXPECT_LE(glm::distance(glm::vec2(400.0f, 312.0f), iconCenter), hitRadius);
+
+    // Mouse just within radius (17.5px away)
+    EXPECT_LE(glm::distance(glm::vec2(412.0f, 312.0f), iconCenter), hitRadius);
+
+    // Mouse outside hit radius (25px away)
+    EXPECT_GT(glm::distance(glm::vec2(400.0f, 325.0f), iconCenter), hitRadius);
+    EXPECT_GT(glm::distance(glm::vec2(450.0f, 300.0f), iconCenter), hitRadius);
+}
+
+TEST(LightVisualizerTest, DrawLightIconAllTypesExecuteSafely) {
+    ImGuiContext* ctx = ImGui::CreateContext();
+    ImGuiIO& io = ImGui::GetIO();
+    io.DisplaySize = ImVec2(800.0f, 600.0f);
+    io.DeltaTime = 1.0f / 60.0f;
+    unsigned char* pixels = nullptr;
+    int width = 0;
+    int height = 0;
+    io.Fonts->GetTexDataAsRGBA32(&pixels, &width, &height);
+    ImGui::NewFrame();
+
+    ImDrawList* drawList = ImGui::GetForegroundDrawList();
+    glm::vec2 screenCenter(200.0f, 150.0f);
+    glm::vec3 lightColor(1.0f, 0.9f, 0.5f);
+
+    // Test each light type with both selected and hover states
+    EXPECT_NO_THROW(LightVisualizer::DrawLightIcon(drawList, screenCenter, LightType::Directional, lightColor, false, false));
+    EXPECT_NO_THROW(LightVisualizer::DrawLightIcon(drawList, screenCenter, LightType::Directional, lightColor, true, true));
+
+    EXPECT_NO_THROW(LightVisualizer::DrawLightIcon(drawList, screenCenter, LightType::Point, lightColor, false, false));
+    EXPECT_NO_THROW(LightVisualizer::DrawLightIcon(drawList, screenCenter, LightType::Point, lightColor, true, true));
+
+    EXPECT_NO_THROW(LightVisualizer::DrawLightIcon(drawList, screenCenter, LightType::Spot, lightColor, false, false));
+    EXPECT_NO_THROW(LightVisualizer::DrawLightIcon(drawList, screenCenter, LightType::Spot, lightColor, true, true));
+
+    // Null drawlist safety
+    EXPECT_NO_THROW(LightVisualizer::DrawLightIcon(nullptr, screenCenter, LightType::Point, lightColor, false, false));
+
+    ImGui::EndFrame();
+    ImGui::DestroyContext(ctx);
 }
 

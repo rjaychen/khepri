@@ -16,8 +16,9 @@ TEST(SceneHierarchyTest, NodeNameInheritsFileStemOnImport) {
     const std::string testPath = "assets/models/bunny.obj";
 
     auto sceneRoot = std::make_shared<SceneNode>("Scene Root");
-    auto loadedNode = ModelImporter::LoadFromFile(*nullContext, testPath);
-    ASSERT_NE(loadedNode, nullptr);
+    auto loadedNodeResult = ModelImporter::LoadFromFile(*nullContext, testPath);
+    ASSERT_TRUE(loadedNodeResult.has_value());
+    auto loadedNode = loadedNodeResult.value();
 
     std::string stemName = std::filesystem::path(testPath).stem().string(); // "bunny"
     const auto& loadedChildren = loadedNode->GetChildren();

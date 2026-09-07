@@ -33,6 +33,10 @@ ComputePipeline::~ComputePipeline() {
 }
 
 void ComputePipeline::CreateDescriptorSetLayout() {
+    if (!m_context || m_context->GetDevice() == VK_NULL_HANDLE) {
+        return;
+    }
+
     VkDescriptorSetLayoutBinding binding{};
     binding.binding = 0;
     binding.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
@@ -50,6 +54,10 @@ void ComputePipeline::CreateDescriptorSetLayout() {
 }
 
 void ComputePipeline::CreatePipeline(const std::string& shaderPath, uint32_t pushConstantSize) {
+    if (!m_context || m_context->GetDevice() == VK_NULL_HANDLE) {
+        return;
+    }
+
     auto code = LoadSPIRVFile(shaderPath);
     if (code.empty()) {
         LOG_WARN("Compute shader code empty for: " + shaderPath);

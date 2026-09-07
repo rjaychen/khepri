@@ -8,6 +8,8 @@
 #include "../src/mesh/ModelImporter.h"
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtx/matrix_decompose.hpp>
+#include <fstream>
+#include <cstdio>
 
 using namespace khepri::graph;
 
@@ -23,7 +25,7 @@ TEST(WorkflowAndLifecycleTest, ParallelBranchTopologicalOrdering) {
     auto sub1  = graph.CreateNode<SubdivisionNode>(nullptr, 1);
     auto prim2 = graph.CreateNode<MeshPrimitiveNode>(nullptr, MeshPrimitiveNode::PrimitiveType::Sphere);
 
-    EXPECT_TRUE(graph.Connect(prim1->FindOutput("MeshBuffer")->id, sub1->FindInput("MeshBuffer")->id));
+    EXPECT_TRUE(graph.Connect(prim1->FindOutput("MeshBuffer")->id, sub1->FindInput("MeshBuffer")->id).has_value());
 
     auto sorted = graph.TopologicalSort();
     ASSERT_EQ(sorted.size(), 3u);
@@ -160,11 +162,23 @@ TEST(WorkflowAndLifecycleTest, LightGizmoScaleIndependence) {
 TEST(WorkflowAndLifecycleTest, ModelImporterNonExistentFileReturnsNullSafely) {
     VulkanContext* nullContext = nullptr;
     auto node1 = ModelImporter::LoadFromFile(*nullContext, "non_existent_path.gltf");
-    EXPECT_EQ(node1, nullptr);
+    EXPECT_FALSE(node1.has_value());
+    EXPECT_EQ(node1.error(), khepri::ImportError::FileNotFound);
 
-    auto node2 = ModelImporter::LoadFromFile(*nullContext, "assets/corrupted_file.obj");
-    EXPECT_EQ(node2, nullptr);
+    auto node2 = ModelImporter::LoadFromFile(*nullContext, "non_existent_file.obj");
+    EXPECT_FALSE(node2.has_value());
+    EXPECT_EQ(node2.error(), khepri::ImportError::FileNotFound);
 
-    auto node3 = ModelImporter::LoadFromFile(*nullContext, "invalid_extension.xyz");
-    EXPECT_EQ(node3, nullptr);
+    // Create a temporary file with unsupported extension to test UnsupportedFormat error
+    const std::string tempUnsupported = "temp_unsupported.xyz";
+    {
+        std::ofstream dummy(tempUnsupported);
+        dummy << "invalid file content";
+    }
+
+    auto node3 = ModelImporter::LoadFromFile(*nullContext, tempUnsupported);
+    EXPECT_FALSE(node3.has_value());
+    EXPECT_EQ(node3.error(), khepri::ImportError::UnsupportedFormat);
+
+    std::remove(tempUnsupported.c_str());
 }

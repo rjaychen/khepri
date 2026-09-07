@@ -10,6 +10,7 @@
 class Camera;
 class SceneNode;
 class LightComponent;
+#include "../scene/Light.h"
 
 namespace khepri {
 
@@ -98,6 +99,25 @@ public:
         glm::vec2& outScreen2
     ) noexcept;
 
+    // Single point world to screen projection
+    [[nodiscard]] static bool ProjectWorldToScreen(
+        const glm::vec3& worldPos,
+        const glm::mat4& viewProj,
+        const glm::vec2& viewportPos,
+        const glm::vec2& viewportSize,
+        glm::vec2& outScreen
+    ) noexcept;
+
+    // Procedural 2D billboard glyph renderer for light nodes
+    static void DrawLightIcon(
+        ImDrawList* drawList,
+        const glm::vec2& screenCenter,
+        LightType type,
+        const glm::vec3& lightColor,
+        bool isSelected,
+        bool isHovered
+    );
+
     // -------------------------------------------------------------
     // Viewport Overlay Rendering
     // -------------------------------------------------------------
@@ -109,7 +129,9 @@ public:
         const SceneNode* selectedNode,
         LightHelperDisplayMode displayMode,
         const glm::vec2& viewportPos,
-        const glm::vec2& viewportSize
+        const glm::vec2& viewportSize,
+        const glm::vec2& mousePos = glm::vec2(-10000.0f),
+        const SceneNode** outHoveredLightNode = nullptr
     );
 
     static void RenderSingleLightHelper(
@@ -119,7 +141,9 @@ public:
         const glm::mat4& worldTransform,
         const glm::vec2& viewportPos,
         const glm::vec2& viewportSize,
-        bool isSelected
+        bool isSelected,
+        bool drawWireframeGuides,
+        bool isHovered = false
     );
 
 private:

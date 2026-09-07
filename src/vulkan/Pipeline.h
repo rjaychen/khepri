@@ -12,6 +12,8 @@ public:
     PipelineBuilder& SetShaders(VkShaderModule vertShader, VkShaderModule fragShader);
     PipelineBuilder& SetVertexInput(const std::vector<VkVertexInputBindingDescription>& bindings,
                                    const std::vector<VkVertexInputAttributeDescription>& attributes);
+    PipelineBuilder& SetVertexInput(std::span<const VkVertexInputBindingDescription> bindings,
+                                   std::span<const VkVertexInputAttributeDescription> attributes);
     PipelineBuilder& SetInputTopology(VkPrimitiveTopology topology);
     PipelineBuilder& SetPolygonMode(VkPolygonMode mode);
     PipelineBuilder& SetCullMode(VkCullModeFlags cullMode, VkFrontFace frontFace);
@@ -22,7 +24,7 @@ public:
     PipelineBuilder& SetDepthFormat(VkFormat format);
     PipelineBuilder& EnableDepthTest(bool depthWriteEnable, VkCompareOp op);
 
-    VkPipeline Build(VulkanContext& context, VkPipelineLayout layout);
+    [[nodiscard]] VkPipeline Build(VulkanContext& context, VkPipelineLayout layout);
 
     static VkShaderModule CreateShaderModule(VulkanContext& context, const std::vector<uint32_t>& code);
 

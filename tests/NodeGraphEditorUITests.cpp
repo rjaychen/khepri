@@ -76,7 +76,7 @@ TEST(NodeGraphEditorUITest, FloatNodeAndVector3NodeEvaluationAndDataflow) {
     ASSERT_NE(floatOutPin, nullptr);
     ASSERT_NE(twistAnglePin, nullptr);
 
-    EXPECT_TRUE(graph.Connect(floatOutPin->id, twistAnglePin->id));
+    EXPECT_TRUE(graph.Connect(floatOutPin->id, twistAnglePin->id).has_value());
     graph.Evaluate();
 
     EXPECT_FLOAT_EQ(twistNode->GetAngle(), 90.0f);

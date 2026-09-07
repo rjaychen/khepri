@@ -2,6 +2,9 @@
 #include "NodeGraphEditorPanel.h"
 #include "../scene/MeshComponent.h"
 #include "../scene/LightNode.h"
+#include "../scene/SceneHierarchyCommand.h"
+#include "../scene/TransformCommand.h"
+#include "../core/UndoStack.h"
 #include <glm/gtc/type_ptr.hpp>
 
 SceneTreePanel::SceneTreePanel(VulkanContext* context)
@@ -26,52 +29,64 @@ void SceneTreePanel::RenderUI(SceneNode* rootNode, std::shared_ptr<MeshComponent
 
     if (ImGui::BeginPopup("AddNodeDropdownPopup")) {
         if (rootNode) {
+            auto addNodeWithUndo = [this, rootNode](std::unique_ptr<SceneNode> newNode) -> SceneNode* {
+                if (m_undoStack) {
+                    auto cmd = std::make_unique<khepri::scene::AddChildNodeCommand>(rootNode, std::move(newNode));
+                    SceneNode* created = cmd->GetCreatedNode();
+                    m_undoStack->PushAndExecute(std::move(cmd));
+                    m_selectedNode = created;
+                    return created;
+                } else {
+                    m_selectedNode = rootNode->AddChild(std::move(newNode));
+                    return m_selectedNode;
+                }
+            };
+
             if (ImGui::BeginMenu("Primitive")) {
                 if (ImGui::MenuItem("Cube")) {
                     auto newMesh = MeshComponent::CreateCube(m_context, 1.0f);
                     auto newNode = std::make_unique<SceneNode>("Cube");
                     newNode->mesh = newMesh;
-                    m_selectedNode = rootNode->AddChild(std::move(newNode));
+                    addNodeWithUndo(std::move(newNode));
                     activeMesh = newMesh;
                 }
                 if (ImGui::MenuItem("Sphere")) {
                     auto newMesh = MeshComponent::CreateSphere(m_context, 0.6f, 32, 16);
                     auto newNode = std::make_unique<SceneNode>("Sphere");
                     newNode->mesh = newMesh;
-                    m_selectedNode = rootNode->AddChild(std::move(newNode));
+                    addNodeWithUndo(std::move(newNode));
                     activeMesh = newMesh;
                 }
                 if (ImGui::MenuItem("Cylinder")) {
                     auto newMesh = MeshComponent::CreateCylinder(m_context, 0.4f, 1.0f, 32);
                     auto newNode = std::make_unique<SceneNode>("Cylinder");
                     newNode->mesh = newMesh;
-                    m_selectedNode = rootNode->AddChild(std::move(newNode));
+                    addNodeWithUndo(std::move(newNode));
                     activeMesh = newMesh;
                 }
                 if (ImGui::MenuItem("Plane")) {
                     auto newMesh = MeshComponent::CreatePlane(m_context, 4.0f, 8);
                     auto newNode = std::make_unique<SceneNode>("Plane");
                     newNode->mesh = newMesh;
-                    m_selectedNode = rootNode->AddChild(std::move(newNode));
+                    addNodeWithUndo(std::move(newNode));
                     activeMesh = newMesh;
                 }
                 ImGui::EndMenu();
             }
             if (ImGui::BeginMenu("Light")) {
                 if (ImGui::MenuItem("Directional Light (Sun)")) {
-                    m_selectedNode = rootNode->AddChild(std::make_unique<DirectionalLightNode>("Directional Light"));
+                    addNodeWithUndo(std::make_unique<DirectionalLightNode>("Directional Light"));
                 }
                 if (ImGui::MenuItem("Point Light")) {
-                    m_selectedNode = rootNode->AddChild(std::make_unique<PointLightNode>("Point Light"));
+                    addNodeWithUndo(std::make_unique<PointLightNode>("Point Light"));
                 }
                 if (ImGui::MenuItem("Spot Light")) {
-                    m_selectedNode = rootNode->AddChild(std::make_unique<SpotLightNode>("Spot Light"));
+                    addNodeWithUndo(std::make_unique<SpotLightNode>("Spot Light"));
                 }
                 ImGui::EndMenu();
             }
             if (ImGui::MenuItem("Empty Node")) {
-                auto node = std::make_unique<SceneNode>("Empty Node");
-                m_selectedNode = rootNode->AddChild(std::move(node));
+                addNodeWithUndo(std::make_unique<SceneNode>("Empty Node"));
             }
         }
         ImGui::EndPopup();
@@ -87,11 +102,15 @@ void SceneTreePanel::RenderUI(SceneNode* rootNode, std::shared_ptr<MeshComponent
         if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("SCENE_NODE_PTR")) {
             SceneNode* draggedNode = *(SceneNode**)payload->Data;
             if (draggedNode && draggedNode->GetParent() != rootNode && draggedNode != rootNode) {
-                SceneNode* oldParent = draggedNode->GetParent();
-                if (oldParent) {
-                    auto detached = oldParent->DetachChild(draggedNode);
-                    if (detached) {
-                        rootNode->AddChild(std::move(detached));
+                if (m_undoStack) {
+                    m_undoStack->PushAndExecute(std::make_unique<khepri::scene::ReparentNodeCommand>(draggedNode, rootNode));
+                } else {
+                    SceneNode* oldParent = draggedNode->GetParent();
+                    if (oldParent) {
+                        auto detached = oldParent->DetachChild(draggedNode);
+                        if (detached) {
+                            rootNode->AddChild(std::move(detached));
+                        }
                     }
                 }
             }
@@ -214,7 +233,11 @@ void SceneTreePanel::RenderNodeTree(SceneNode* node) {
     // --- Visibility Checkbox (eye toggle) ---
     bool vis = node->visible;
     if (ImGui::Checkbox("##vis", &vis)) {
-        node->visible = vis;
+        if (m_undoStack) {
+            m_undoStack->PushAndExecute(std::make_unique<khepri::scene::SetNodeVisibilityCommand>(node, vis));
+        } else {
+            node->visible = vis;
+        }
     }
     if (ImGui::IsItemHovered()) {
         ImGui::SetTooltip(vis ? "Visible — click to hide" : "Hidden — click to show");
@@ -262,11 +285,15 @@ void SceneTreePanel::RenderNodeTree(SceneNode* node) {
         if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("SCENE_NODE_PTR")) {
             SceneNode* draggedNode = *(SceneNode**)payload->Data;
             if (draggedNode && draggedNode != node && draggedNode->GetParent() != node && !node->IsDescendantOf(draggedNode)) {
-                SceneNode* oldParent = draggedNode->GetParent();
-                if (oldParent) {
-                    auto detached = oldParent->DetachChild(draggedNode);
-                    if (detached) {
-                        node->AddChild(std::move(detached));
+                if (m_undoStack) {
+                    m_undoStack->PushAndExecute(std::make_unique<khepri::scene::ReparentNodeCommand>(draggedNode, node));
+                } else {
+                    SceneNode* oldParent = draggedNode->GetParent();
+                    if (oldParent) {
+                        auto detached = oldParent->DetachChild(draggedNode);
+                        if (detached) {
+                            node->AddChild(std::move(detached));
+                        }
                     }
                 }
             }
@@ -294,7 +321,11 @@ void SceneTreePanel::RenderNodeTree(SceneNode* node) {
                 if (nodeHasMesh(node, nodeHasMesh)) {
                     if (m_context) m_context->WaitIdle();
                 }
-                node->GetParent()->RemoveChild(node);
+                if (m_undoStack) {
+                    m_undoStack->PushAndExecute(std::make_unique<khepri::scene::RemoveChildNodeCommand>(node->GetParent(), node));
+                } else {
+                    node->GetParent()->RemoveChild(node);
+                }
                 ImGui::EndPopup();
                 if (opened) ImGui::TreePop();
                 ImGui::PopID();
@@ -320,12 +351,31 @@ void SceneTreePanel::RenderInspector(SceneNode* node, const std::filesystem::pat
     char nameBuf[256];
     strncpy(nameBuf, node->name.c_str(), sizeof(nameBuf));
     nameBuf[sizeof(nameBuf) - 1] = '\0';
-    if (ImGui::InputText("Node Name", nameBuf, sizeof(nameBuf))) {
-        node->name = nameBuf;
+    if (ImGui::InputText("Node Name", nameBuf, sizeof(nameBuf), ImGuiInputTextFlags_EnterReturnsTrue)) {
+        if (m_undoStack && node->name != nameBuf) {
+            m_undoStack->PushAndExecute(std::make_unique<khepri::scene::RenameNodeCommand>(node, std::string(nameBuf)));
+        } else {
+            node->name = nameBuf;
+        }
+    } else if (ImGui::IsItemDeactivatedAfterEdit()) {
+        if (node->name != nameBuf) {
+            if (m_undoStack) {
+                m_undoStack->PushAndExecute(std::make_unique<khepri::scene::RenameNodeCommand>(node, std::string(nameBuf)));
+            } else {
+                node->name = nameBuf;
+            }
+        }
     }
 
     // Visibility toggle in inspector too
-    ImGui::Checkbox("Visible", &node->visible);
+    bool vis = node->visible;
+    if (ImGui::Checkbox("Visible", &vis)) {
+        if (m_undoStack) {
+            m_undoStack->PushAndExecute(std::make_unique<khepri::scene::SetNodeVisibilityCommand>(node, vis));
+        } else {
+            node->visible = vis;
+        }
+    }
 
     ImGui::Separator();
     ImGui::TextColored(ImVec4(0.3f, 0.8f, 1.0f, 1.0f), "Transform");
@@ -334,30 +384,79 @@ void SceneTreePanel::RenderInspector(SceneNode* node, const std::filesystem::pat
     if (ImGui::DragFloat3("Position", glm::value_ptr(node->position), 0.1f, -100.0f, 100.0f)) {
         node->SyncPropertiesToTransform();
     }
+    if (ImGui::IsItemActivated()) {
+        m_dragStartPos = node->position;
+        m_dragStartRot = node->rotationDegrees;
+        m_dragStartScale = node->scale;
+    }
+    if (ImGui::IsItemDeactivatedAfterEdit()) {
+        if (m_undoStack && m_dragStartPos != node->position) {
+            m_undoStack->Push(std::make_unique<khepri::scene::TransformCommand>(
+                node, m_dragStartPos, m_dragStartRot, m_dragStartScale,
+                node->position, node->rotationDegrees, node->scale));
+        }
+    }
 
     // Rotation
     if (ImGui::DragFloat3("Rotation", glm::value_ptr(node->rotationDegrees), 0.1f, -360.0f, 360.0f)) {
         node->SyncPropertiesToTransform();
     }
+    if (ImGui::IsItemActivated()) {
+        m_dragStartPos = node->position;
+        m_dragStartRot = node->rotationDegrees;
+        m_dragStartScale = node->scale;
+    }
+    if (ImGui::IsItemDeactivatedAfterEdit()) {
+        if (m_undoStack && m_dragStartRot != node->rotationDegrees) {
+            m_undoStack->Push(std::make_unique<khepri::scene::TransformCommand>(
+                node, m_dragStartPos, m_dragStartRot, m_dragStartScale,
+                node->position, node->rotationDegrees, node->scale));
+        }
+    }
 
     // Scale Lock & Scale
+    bool isLightNode = (node->lightComponent != nullptr);
+    if (isLightNode) {
+        ImGui::BeginDisabled();
+    }
     ImGui::Checkbox("🔒 Lock Scale Aspect Ratio", &node->lockScale);
     glm::vec3 oldScale = node->scale;
     glm::vec3 newScale = oldScale;
     if (ImGui::DragFloat3("Scale", glm::value_ptr(newScale), 0.01f, 0.001f, 100.0f)) {
-        if (node->lockScale) {
-            float factor = 1.0f;
-            if (std::abs(newScale.x - oldScale.x) > 1e-5f && oldScale.x > 1e-5f) {
-                factor = newScale.x / oldScale.x;
-            } else if (std::abs(newScale.y - oldScale.y) > 1e-5f && oldScale.y > 1e-5f) {
-                factor = newScale.y / oldScale.y;
-            } else if (std::abs(newScale.z - oldScale.z) > 1e-5f && oldScale.z > 1e-5f) {
-                factor = newScale.z / oldScale.z;
+        if (!isLightNode) {
+            if (node->lockScale) {
+                float factor = 1.0f;
+                if (std::abs(newScale.x - oldScale.x) > 1e-5f && oldScale.x > 1e-5f) {
+                    factor = newScale.x / oldScale.x;
+                } else if (std::abs(newScale.y - oldScale.y) > 1e-5f && oldScale.y > 1e-5f) {
+                    factor = newScale.y / oldScale.y;
+                } else if (std::abs(newScale.z - oldScale.z) > 1e-5f && oldScale.z > 1e-5f) {
+                    factor = newScale.z / oldScale.z;
+                }
+                newScale = glm::clamp(oldScale * factor, glm::vec3(0.001f), glm::vec3(100.0f));
             }
-            newScale = glm::clamp(oldScale * factor, glm::vec3(0.001f), glm::vec3(100.0f));
+            node->scale = newScale;
+            node->SyncPropertiesToTransform();
         }
-        node->scale = newScale;
-        node->SyncPropertiesToTransform();
+    }
+    if (isLightNode) {
+        ImGui::EndDisabled();
+        if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+            ImGui::SetTooltip("Scale is disabled for light nodes. Light volume is governed by Range (m) and Cutoff Angles below.");
+        }
+    } else {
+        if (ImGui::IsItemActivated()) {
+            m_dragStartPos = node->position;
+            m_dragStartRot = node->rotationDegrees;
+            m_dragStartScale = node->scale;
+        }
+        if (ImGui::IsItemDeactivatedAfterEdit()) {
+            if (m_undoStack && m_dragStartScale != node->scale) {
+                m_undoStack->Push(std::make_unique<khepri::scene::TransformCommand>(
+                    node, m_dragStartPos, m_dragStartRot, m_dragStartScale,
+                    node->position, node->rotationDegrees, node->scale));
+            }
+        }
     }
 
     if (node->lightComponent) {

@@ -14,7 +14,7 @@ bool OBJImporter::CanImport(const std::string& filepath) const {
     return ext == ".obj";
 }
 
-std::shared_ptr<SceneNode> OBJImporter::Import(VulkanContext& context, const std::string& filepath,
+std::expected<std::shared_ptr<SceneNode>, khepri::ImportError> OBJImporter::Import(VulkanContext& context, const std::string& filepath,
                                                 VkDescriptorSetLayout, DescriptorAllocator*, VkBuffer) {
     LOG_INFO("Loading Wavefront OBJ model via OBJImporter: " + filepath);
 
@@ -36,7 +36,7 @@ std::shared_ptr<SceneNode> OBJImporter::Import(VulkanContext& context, const std
     std::ifstream file(resolvedPath);
     if (!file.is_open()) {
         LOG_ERROR("Failed to open OBJ file: " + resolvedPath);
-        return nullptr;
+        return std::unexpected(khepri::ImportError::FileNotFound);
     }
 
     std::vector<glm::vec3> temp_positions;
@@ -139,7 +139,7 @@ std::shared_ptr<SceneNode> OBJImporter::Import(VulkanContext& context, const std
 
     if (vertices.empty() || indices.empty()) {
         LOG_ERROR("Failed to parse valid OBJ geometry from: " + filepath);
-        return nullptr;
+        return std::unexpected(khepri::ImportError::ParsingFailed);
     }
 
     if (temp_normals.empty()) {

@@ -24,6 +24,13 @@ PipelineBuilder& PipelineBuilder::SetVertexInput(const std::vector<VkVertexInput
     return *this;
 }
 
+PipelineBuilder& PipelineBuilder::SetVertexInput(std::span<const VkVertexInputBindingDescription> bindings,
+                                                std::span<const VkVertexInputAttributeDescription> attributes) {
+    m_vertexBindings.assign(bindings.begin(), bindings.end());
+    m_vertexAttributes.assign(attributes.begin(), attributes.end());
+    return *this;
+}
+
 PipelineBuilder& PipelineBuilder::SetInputTopology(VkPrimitiveTopology topology) {
     m_inputAssembly.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
     m_inputAssembly.topology = topology;

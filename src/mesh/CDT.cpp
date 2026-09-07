@@ -2,16 +2,25 @@
 #include "GeometricPredicates.h"
 #include "../core/Logger.h"
 #include <algorithm>
-#include <set>
+#include <unordered_map>
+
+namespace {
+
+struct CDT_Edge {
+    uint32_t u, v;
+    bool operator==(const CDT_Edge& o) const noexcept { return u == o.u && v == o.v; }
+};
+
+struct CDT_EdgeHash {
+    size_t operator()(const CDT_Edge& e) const noexcept {
+        return (static_cast<size_t>(e.u) << 32) ^ static_cast<size_t>(e.v);
+    }
+};
+
+} // namespace
 
 struct CDT_Triangle {
     uint32_t p0, p1, p2;
-
-    bool HasEdge(uint32_t i0, uint32_t i1) const {
-        return (p0 == i0 && p1 == i1) || (p1 == i0 && p0 == i1) ||
-               (p1 == i0 && p2 == i1) || (p2 == i0 && p1 == i1) ||
-               (p2 == i0 && p0 == i1) || (p0 == i0 && p2 == i1);
-    }
 };
 
 void CDT::Triangulate2D(const std::vector<glm::vec2>& points,
@@ -53,24 +62,19 @@ void CDT::Triangulate2D(const std::vector<glm::vec2>& points,
             }
         }
 
-        // Polygon Hole Edges
-        std::vector<std::pair<uint32_t, uint32_t>> polygonEdges;
+        // Cavity boundary via directed-edge counting = O(bad) instead of the
+        // full pairwise O(bad^2) search. Each edge present is interior to the cavity
+        // and dropped, leaving only the external boundary.
+        std::vector<CDT_Edge> polygonEdges;
+        std::unordered_map<CDT_Edge, int, CDT_EdgeHash> edgeCount;
         for (const auto& tri : badTriangles) {
-            std::pair<uint32_t, uint32_t> e[3] = {
-                {tri.p0, tri.p1}, {tri.p1, tri.p2}, {tri.p2, tri.p0}
-            };
-            for (int k = 0; k < 3; ++k) {
-                bool shared = false;
-                for (const auto& other : badTriangles) {
-                    if (&tri == &other) continue;
-                    if (other.HasEdge(e[k].first, e[k].second)) {
-                        shared = true;
-                        break;
-                    }
-                }
-                if (!shared) {
-                    polygonEdges.push_back(e[k]);
-                }
+            edgeCount[{tri.p0, tri.p1}]++;
+            edgeCount[{tri.p1, tri.p2}]++;
+            edgeCount[{tri.p2, tri.p0}]++;
+        }
+        for (const auto& [edge, count] : edgeCount) {
+            if (count == 1 && edgeCount.find({edge.v, edge.u}) == edgeCount.end()) {
+                polygonEdges.push_back(edge);
             }
         }
 
@@ -84,7 +88,7 @@ void CDT::Triangulate2D(const std::vector<glm::vec2>& points,
 
         // Re-triangulate hole
         for (const auto& edge : polygonEdges) {
-            triangles.push_back({ edge.first, edge.second, i });
+            triangles.push_back({ edge.u, edge.v, i });
         }
     }
 

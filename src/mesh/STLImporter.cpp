@@ -12,13 +12,13 @@ bool STLImporter::CanImport(const std::string& filepath) const {
     return ext == ".stl";
 }
 
-std::shared_ptr<SceneNode> STLImporter::Import(VulkanContext& context, const std::string& filepath,
+std::expected<std::shared_ptr<SceneNode>, khepri::ImportError> STLImporter::Import(VulkanContext& context, const std::string& filepath,
                                                 VkDescriptorSetLayout, DescriptorAllocator*, VkBuffer) {
     LOG_INFO("Loading STL model via STLImporter: " + filepath);
     std::ifstream file(filepath, std::ios::binary);
     if (!file.is_open()) {
         LOG_ERROR("Failed to open STL file: " + filepath);
-        return nullptr;
+        return std::unexpected(khepri::ImportError::FileNotFound);
     }
 
     std::vector<Vertex> vertices;
@@ -54,9 +54,30 @@ std::shared_ptr<SceneNode> STLImporter::Import(VulkanContext& context, const std
             }
 
             uint32_t baseIdx = static_cast<uint32_t>(vertices.size());
-            vertices.push_back({glm::vec3(v0[0], v0[1], v0[2]), normal, glm::vec4(1.0f, 0.0f, 0.0f, 1.0f), glm::vec2(0.0f)});
-            vertices.push_back({glm::vec3(v1[0], v1[1], v1[2]), normal, glm::vec4(1.0f, 0.0f, 0.0f, 1.0f), glm::vec2(1.0f, 0.0f)});
-            vertices.push_back({glm::vec3(v2[0], v2[1], v2[2]), normal, glm::vec4(1.0f, 0.0f, 0.0f, 1.0f), glm::vec2(0.5f, 1.0f)});
+            vertices.push_back(Vertex{
+                .position = glm::vec3(v0[0], v0[1], v0[2]),
+                .normal = normal,
+                .tangent = glm::vec4(1.0f, 0.0f, 0.0f, 1.0f),
+                .uv = glm::vec2(0.0f),
+                .jointIndices = glm::uvec4(0),
+                .jointWeights = glm::vec4(1.0f, 0.0f, 0.0f, 0.0f)
+            });
+            vertices.push_back(Vertex{
+                .position = glm::vec3(v1[0], v1[1], v1[2]),
+                .normal = normal,
+                .tangent = glm::vec4(1.0f, 0.0f, 0.0f, 1.0f),
+                .uv = glm::vec2(1.0f, 0.0f),
+                .jointIndices = glm::uvec4(0),
+                .jointWeights = glm::vec4(1.0f, 0.0f, 0.0f, 0.0f)
+            });
+            vertices.push_back(Vertex{
+                .position = glm::vec3(v2[0], v2[1], v2[2]),
+                .normal = normal,
+                .tangent = glm::vec4(1.0f, 0.0f, 0.0f, 1.0f),
+                .uv = glm::vec2(0.5f, 1.0f),
+                .jointIndices = glm::uvec4(0),
+                .jointWeights = glm::vec4(1.0f, 0.0f, 0.0f, 0.0f)
+            });
 
             indices.push_back(baseIdx);
             indices.push_back(baseIdx + 1);
@@ -84,9 +105,30 @@ std::shared_ptr<SceneNode> STLImporter::Import(VulkanContext& context, const std
             } else if (word == "endfacet") {
                 if (faceVerts.size() == 3) {
                     uint32_t baseIdx = static_cast<uint32_t>(vertices.size());
-                    vertices.push_back({faceVerts[0], currentNorm, glm::vec4(1.0f, 0.0f, 0.0f, 1.0f), glm::vec2(0.0f)});
-                    vertices.push_back({faceVerts[1], currentNorm, glm::vec4(1.0f, 0.0f, 0.0f, 1.0f), glm::vec2(1.0f, 0.0f)});
-                    vertices.push_back({faceVerts[2], currentNorm, glm::vec4(1.0f, 0.0f, 0.0f, 1.0f), glm::vec2(0.5f, 1.0f)});
+                    vertices.push_back(Vertex{
+                        .position = faceVerts[0],
+                        .normal = currentNorm,
+                        .tangent = glm::vec4(1.0f, 0.0f, 0.0f, 1.0f),
+                        .uv = glm::vec2(0.0f),
+                        .jointIndices = glm::uvec4(0),
+                        .jointWeights = glm::vec4(1.0f, 0.0f, 0.0f, 0.0f)
+                    });
+                    vertices.push_back(Vertex{
+                        .position = faceVerts[1],
+                        .normal = currentNorm,
+                        .tangent = glm::vec4(1.0f, 0.0f, 0.0f, 1.0f),
+                        .uv = glm::vec2(1.0f, 0.0f),
+                        .jointIndices = glm::uvec4(0),
+                        .jointWeights = glm::vec4(1.0f, 0.0f, 0.0f, 0.0f)
+                    });
+                    vertices.push_back(Vertex{
+                        .position = faceVerts[2],
+                        .normal = currentNorm,
+                        .tangent = glm::vec4(1.0f, 0.0f, 0.0f, 1.0f),
+                        .uv = glm::vec2(0.5f, 1.0f),
+                        .jointIndices = glm::uvec4(0),
+                        .jointWeights = glm::vec4(1.0f, 0.0f, 0.0f, 0.0f)
+                    });
                     indices.push_back(baseIdx);
                     indices.push_back(baseIdx + 1);
                     indices.push_back(baseIdx + 2);
@@ -97,7 +139,7 @@ std::shared_ptr<SceneNode> STLImporter::Import(VulkanContext& context, const std
 
     if (vertices.empty() || indices.empty()) {
         LOG_ERROR("Failed to parse valid STL geometry from: " + filepath);
-        return nullptr;
+        return std::unexpected(khepri::ImportError::ParsingFailed);
     }
 
     auto meshComp = std::make_shared<MeshComponent>(context, vertices, indices);

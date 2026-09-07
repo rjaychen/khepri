@@ -4,7 +4,7 @@ if(POLICY CMP0135)
     cmake_policy(SET CMP0135 NEW)
 endif()
 
-project(KhepriEngine VERSION 0.1.8 LANGUAGES C CXX)
+project(KhepriEngine VERSION 0.1.9 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -207,6 +207,13 @@ file(GLOB_RECURSE CORE_SOURCES
 list(APPEND CORE_SOURCES
     "${CMAKE_CURRENT_SOURCE_DIR}/src/mesh/GLTFImporter.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/mesh/GLTFImporter.h"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/core/UndoStack.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/core/UndoStack.h"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/core/Command.h"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/scene/TransformCommand.h"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/scene/SceneHierarchyCommand.h"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/graph/NodeGraphCommand.h"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/animation/KeyframeCommand.h"
 )
 list(REMOVE_DUPLICATES CORE_SOURCES)
 

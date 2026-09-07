@@ -1,6 +1,8 @@
 #include "TransformGizmo.h"
 #include "../scene/Camera.h"
 #include "../scene/SceneNode.h"
+#include "../core/UndoStack.h"
+#include "../scene/TransformCommand.h"
 #include <glm/gtx/matrix_decompose.hpp>
 #include <glm/gtx/vector_angle.hpp>
 
@@ -170,6 +172,11 @@ bool TransformGizmo::UpdateAndRender(
         return false;
     }
 
+    if (targetNode->lightComponent != nullptr && m_operation == GizmoOperation::Scale) {
+        ResetInteraction();
+        return false;
+    }
+
     glm::mat4 worldMat = targetNode->GetWorldTransform();
     glm::vec3 centerWorld = glm::vec3(worldMat[3]);
 
@@ -217,19 +224,24 @@ bool TransformGizmo::UpdateAndRender(
             m_isDragging = true;
             m_activeAxis = m_hoveredAxis;
             m_dragStartMousePos = mousePos;
+            m_initialCenterWorld = centerWorld;
 
             m_initialNodePosition = targetNode->position;
             m_initialNodeRotation = targetNode->rotationDegrees;
             m_initialNodeScale = targetNode->scale;
 
             Ray cursorRay = ScreenToRay(mousePos, viewportPos, viewportSize, viewProjInv);
-            if (m_operation == GizmoOperation::Translate || m_operation == GizmoOperation::Scale) {
+            if (m_operation == GizmoOperation::Translate) {
+                glm::vec3 moveAxis = (m_activeAxis == GizmoAxis::X) ? axisX : ((m_activeAxis == GizmoAxis::Y) ? axisY : axisZ);
+                SkewRayHit hit = RayAxisClosestPoint(cursorRay, m_initialCenterWorld, moveAxis);
+                m_dragStartAxisParam = hit.valid ? hit.axisParam : 0.0f;
+            } else if (m_operation == GizmoOperation::Scale) {
                 glm::vec3 planeNorm = (m_activeAxis == GizmoAxis::X) ? axisY : ((m_activeAxis == GizmoAxis::Y) ? axisZ : axisX);
-                auto hit = RayPlaneIntersection(cursorRay, centerWorld, planeNorm);
+                RayPlaneHit hit = RayPlaneIntersection(cursorRay, centerWorld, planeNorm);
                 m_dragStartHitPoint = hit.hit ? hit.point : centerWorld;
             } else if (m_operation == GizmoOperation::Rotate) {
                 glm::vec3 rotAxis = (m_activeAxis == GizmoAxis::X) ? axisX : ((m_activeAxis == GizmoAxis::Y) ? axisY : axisZ);
-                auto hit = RayPlaneIntersection(cursorRay, centerWorld, rotAxis);
+                RayPlaneHit hit = RayPlaneIntersection(cursorRay, centerWorld, rotAxis);
                 m_dragStartHitPoint = hit.hit ? hit.point : centerWorld;
             }
         }
@@ -239,13 +251,13 @@ bool TransformGizmo::UpdateAndRender(
 
             if (m_operation == GizmoOperation::Translate) {
                 glm::vec3 moveAxis = (m_activeAxis == GizmoAxis::X) ? axisX : ((m_activeAxis == GizmoAxis::Y) ? axisY : axisZ);
-                auto closest = RayAxisClosestPoint(cursorRay, centerWorld, moveAxis);
+                auto closest = RayAxisClosestPoint(cursorRay, m_initialCenterWorld, moveAxis);
                 if (closest.valid) {
-                    float deltaParam = closest.axisParam;
-                    glm::vec3 newPos = m_initialNodePosition + moveAxis * deltaParam;
+                    float deltaParam = closest.axisParam - m_dragStartAxisParam;
                     if (snapEnabled) {
-                        newPos = SnapVector(newPos, translationSnap);
+                        deltaParam = SnapValue(deltaParam, translationSnap);
                     }
+                    glm::vec3 newPos = m_initialNodePosition + moveAxis * deltaParam;
                     targetNode->position = newPos;
                     targetNode->SyncPropertiesToTransform();
                 }
@@ -287,6 +299,18 @@ bool TransformGizmo::UpdateAndRender(
         }
     } else {
         if (m_isDragging) {
+            if (m_undoStack && targetNode) {
+                bool changed = (targetNode->position != m_initialNodePosition ||
+                                targetNode->rotationDegrees != m_initialNodeRotation ||
+                                targetNode->scale != m_initialNodeScale);
+                if (changed) {
+                    m_undoStack->Push(std::make_unique<scene::TransformCommand>(
+                        targetNode,
+                        m_initialNodePosition, m_initialNodeRotation, m_initialNodeScale,
+                        targetNode->position, targetNode->rotationDegrees, targetNode->scale
+                    ));
+                }
+            }
             m_isDragging = false;
             m_activeAxis = GizmoAxis::None;
         }
