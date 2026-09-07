@@ -16,7 +16,7 @@ bool GLTFImporter::CanImport(const std::string& filepath) const {
     return ext == ".gltf" || ext == ".glb";
 }
 
-std::shared_ptr<SceneNode> GLTFImporter::Import(VulkanContext& context, const std::string& filepath,
+std::expected<std::shared_ptr<SceneNode>, khepri::ImportError> GLTFImporter::Import(VulkanContext& context, const std::string& filepath,
                                                  VkDescriptorSetLayout setLayout, DescriptorAllocator* allocator, VkBuffer lightUBOBuffer) {
     LOG_INFO("Loading glTF model via GLTFImporter: " + filepath);
 
@@ -35,13 +35,18 @@ std::shared_ptr<SceneNode> GLTFImporter::Import(VulkanContext& context, const st
         }
     }
 
+    if (!std::filesystem::exists(resolvedPath)) {
+        LOG_ERROR("Failed to find glTF file: " + resolvedPath);
+        return std::unexpected(khepri::ImportError::FileNotFound);
+    }
+
     cgltf_options options = {};
     cgltf_data* data = NULL;
     cgltf_result result = cgltf_parse_file(&options, resolvedPath.c_str(), &data);
 
     if (result != cgltf_result_success) {
         LOG_ERROR("Failed to parse glTF file: " + resolvedPath + " (Error code: " + std::to_string(result) + ")");
-        return nullptr;
+        return std::unexpected(khepri::ImportError::ParsingFailed);
     }
 
     result = cgltf_load_buffers(&options, data, resolvedPath.c_str());
@@ -49,7 +54,7 @@ std::shared_ptr<SceneNode> GLTFImporter::Import(VulkanContext& context, const st
         LOG_ERROR("Failed to load glTF buffers for: " + filepath
                   + " (cgltf error: " + std::to_string(static_cast<int>(result)) + ")");
         cgltf_free(data);
-        return nullptr;
+        return std::unexpected(khepri::ImportError::ParsingFailed);
     }
 
     auto rootNode = std::make_shared<SceneNode>("glTF Root: " + filepath);

@@ -11,6 +11,8 @@
 class Camera;
 class SceneNode;
 
+namespace khepri::core { class UndoStack; }
+
 namespace khepri {
 
 enum class GizmoOperation {
@@ -115,6 +117,9 @@ public:
     [[nodiscard]] bool IsUsing() const noexcept { return m_isDragging; }
     [[nodiscard]] bool IsHovered() const noexcept { return m_hoveredAxis != GizmoAxis::None; }
 
+    void SetUndoStack(core::UndoStack* undoStack) noexcept { m_undoStack = undoStack; }
+    [[nodiscard]] core::UndoStack* GetUndoStack() const noexcept { return m_undoStack; }
+
     // Snapping configuration
     bool snapEnabled = false;
     float translationSnap = 1.0f;  // 1.0 meter/unit default
@@ -185,6 +190,7 @@ private:
     GizmoAxis m_activeAxis = GizmoAxis::None;
 
     bool m_isDragging = false;
+    glm::vec3 m_initialCenterWorld{0.0f};
     glm::vec2 m_dragStartMousePos{0.0f};
     glm::vec3 m_dragStartHitPoint{0.0f};
     float m_dragStartAxisParam = 0.0f;
@@ -193,6 +199,8 @@ private:
     glm::vec3 m_initialNodePosition{0.0f};
     glm::vec3 m_initialNodeRotation{0.0f};
     glm::vec3 m_initialNodeScale{1.0f};
+
+    core::UndoStack* m_undoStack{nullptr};
 };
 
 } // namespace khepri

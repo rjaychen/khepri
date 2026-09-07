@@ -334,13 +334,18 @@ class KhepriWindowManager:
         return found_hwnd
 
     def ensure_window(self) -> Optional[int]:
+        if self.hwnd and user32.IsWindow(self.hwnd):
+            return self.hwnd
+
         hwnd = self.find_window()
         if hwnd:
-            if user32.IsIconic(hwnd):
-                user32.ShowWindow(hwnd, SW_RESTORE)
             return hwnd
 
         if not self.auto_launch:
+            return None
+
+        # Do not launch a duplicate if an existing process is already running
+        if self.proc and self.proc.poll() is None:
             return None
 
         print("[KhepriOracle] Window not found. Looking for KhepriEngine executable to launch...")
@@ -391,9 +396,6 @@ class KhepriWindowManager:
             self.hwnd = self.find_window()
             if not self.hwnd:
                 return None
-
-        if user32.IsIconic(self.hwnd):
-            user32.ShowWindow(self.hwnd, SW_RESTORE)
 
         rect = ctypes.wintypes.RECT()
         user32.GetClientRect(self.hwnd, ctypes.byref(rect))

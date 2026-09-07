@@ -15,12 +15,12 @@ void AssetManager::Initialize(VulkanContext& context) {
     m_defaultMaterial = std::make_shared<Material>("DefaultPBR");
     m_defaultMaterial->SetBaseColorFactor(glm::vec4(0.8f, 0.8f, 0.8f, 1.0f));
 
-    m_defaultEmissiveLightMaterial = std::make_shared<Material>("EmissiveLightGizmo");
+    m_defaultEmissiveLightMaterial = std::make_shared<Material>("EmissiveLight");
     m_defaultEmissiveLightMaterial->SetBaseColorFactor(glm::vec4(1.0f, 0.95f, 0.8f, 1.0f));
     m_defaultEmissiveLightMaterial->SetEmissiveFactor(glm::vec4(1.0f, 0.95f, 0.8f, 5.0f));
 
     m_materials["DefaultPBR"] = m_defaultMaterial;
-    m_materials["EmissiveLightGizmo"] = m_defaultEmissiveLightMaterial;
+    m_materials["EmissiveLight"] = m_defaultEmissiveLightMaterial;
 
     LOG_INFO("AssetManager initialized with default materials.");
 }

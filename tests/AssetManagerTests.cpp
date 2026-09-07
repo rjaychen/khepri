@@ -18,7 +18,7 @@ TEST(AssetManagerTest, SingletonInitializationAndDefaultMaterials) {
 
     auto emissiveMat = khepri::AssetManager::Instance().GetDefaultEmissiveLightMaterial();
     ASSERT_NE(emissiveMat, nullptr);
-    EXPECT_EQ(emissiveMat->GetName(), "EmissiveLightGizmo");
+    EXPECT_EQ(emissiveMat->GetName(), "EmissiveLight");
 }
 
 TEST(AssetManagerTest, MaterialCreationAndPropertyMutation) {

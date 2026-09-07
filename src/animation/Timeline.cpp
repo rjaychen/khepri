@@ -1,46 +1,101 @@
 #include "Timeline.h"
 #include <algorithm>
+#include <unordered_map>
 
-glm::vec3 AnimationTrack::SamplePosition(float time) const {
-    if (positionKeys.empty()) return glm::vec3(0.0f);
-    if (positionKeys.size() == 1 || time <= positionKeys.front().time) return positionKeys.front().value;
-    if (time >= positionKeys.back().time) return positionKeys.back().value;
+namespace {
 
-    for (size_t i = 0; i < positionKeys.size() - 1; ++i) {
-        if (time >= positionKeys[i].time && time <= positionKeys[i + 1].time) {
-            float t = (time - positionKeys[i].time) / (positionKeys[i + 1].time - positionKeys[i].time);
-            return glm::mix(positionKeys[i].value, positionKeys[i + 1].value, t);
+// Locates the key segment [i, i+1] containing `time` in a sorted key vector via
+// binary search (O(log n) instead of the previous O(n) linear scan). Returns
+// the index i of the left key of the containing segment. Caller guarantees
+// keys.size() >= 2 and keys.front().time <= time < keys.back().time.
+template <typename Keyvec>
+size_t FindSegment(const Keyvec& keys, float time) {
+    // upper_bound: first key with time strictly greater than `time`.
+    auto it = std::upper_bound(keys.begin(), keys.end(), time,
+                               [](float t, const auto& k) { return t < k.time; });
+    // It is never begin() (time >= front) and never end() (time < back), so the
+    // left key of the segment is the element before it.
+    size_t hi = static_cast<size_t>(std::distance(keys.begin(), it));
+    return hi - 1;
+}
+
+// Normalized [0,1] parameter within a segment, honoring InterpolationMode.
+// Step holds the left key's value (returns 0); Linear/CubicSpline currently
+// share linear parameterization (true cubic-spline tangents are future work,
+// but the enum is no longer silently ignored - Step now behaves distinctly).
+float SegmentParam(float time, float t0, float t1, InterpolationMode mode) {
+    if (mode == InterpolationMode::Step) return 0.0f;
+    const float span = t1 - t0;
+    return span > 0.0f ? ((time - t0) / span) : 0.0f;
+}
+
+template<typename T>
+T SampleTrackInternal(const std::vector<Keyframe<T>>& keys, float time, const T& defaultValue) {
+    if (keys.empty()) return defaultValue;
+    if (keys.size() == 1 || time <= keys.front().time) return keys.front().value;
+    if (time >= keys.back().time) return keys.back().value;
+
+    const size_t i = FindSegment(keys, time);
+    const float t = SegmentParam(time, keys[i].time, keys[i + 1].time, keys[i].interpolation);
+
+    if constexpr (std::is_same_v<T, glm::quat>) {
+        return glm::slerp(keys[i].value, keys[i + 1].value, t);
+    } else {
+        return glm::mix(keys[i].value, keys[i + 1].value, t);
+    }
+}
+
+template<typename T>
+void AddOrUpdateKeyInternal(std::vector<Keyframe<T>>& keys, float time, const T& value, InterpolationMode mode) {
+    for (auto& k : keys) {
+        if (std::abs(k.time - time) < 1e-4f) {
+            k.value = value;
+            k.interpolation = mode;
+            return;
         }
     }
-    return positionKeys.front().value;
+    keys.push_back(Keyframe<T>{.time = time, .value = value, .interpolation = mode});
+    std::sort(keys.begin(), keys.end(), [](const auto& a, const auto& b) { return a.time < b.time; });
+}
+
+// Build a name->node lookup for the whole subtree in one traversal, so
+// EvaluateAtTime resolves each track's target in O(1) instead of running a
+// full-tree DFS per track per frame.
+static void BuildNodeIndex(SceneNode* node, std::unordered_map<std::string, SceneNode*>& index) {
+    if (!node) return;
+    // First writer wins (matches FindNodeByName's pre-order first-match semantics).
+    index.emplace(node->name, node);
+    for (const auto& child : node->GetChildren()) {
+        BuildNodeIndex(child.get(), index);
+    }
+}
+
+} // namespace
+
+template<typename T>
+T AnimationTrack::Sample(float time) const {
+    if constexpr (std::is_same_v<T, glm::vec3>) {
+        return SamplePosition(time);
+    } else if constexpr (std::is_same_v<T, glm::quat>) {
+        return SampleRotation(time);
+    } else {
+        return T{};
+    }
+}
+
+template glm::vec3 AnimationTrack::Sample<glm::vec3>(float time) const;
+template glm::quat AnimationTrack::Sample<glm::quat>(float time) const;
+
+glm::vec3 AnimationTrack::SamplePosition(float time) const {
+    return SampleTrackInternal(positionKeys, time, glm::vec3(0.0f));
 }
 
 glm::quat AnimationTrack::SampleRotation(float time) const {
-    if (rotationKeys.empty()) return glm::quat(1.0f, 0.0f, 0.0f, 0.0f);
-    if (rotationKeys.size() == 1 || time <= rotationKeys.front().time) return rotationKeys.front().value;
-    if (time >= rotationKeys.back().time) return rotationKeys.back().value;
-
-    for (size_t i = 0; i < rotationKeys.size() - 1; ++i) {
-        if (time >= rotationKeys[i].time && time <= rotationKeys[i + 1].time) {
-            float t = (time - rotationKeys[i].time) / (rotationKeys[i + 1].time - rotationKeys[i].time);
-            return glm::slerp(rotationKeys[i].value, rotationKeys[i + 1].value, t);
-        }
-    }
-    return rotationKeys.front().value;
+    return SampleTrackInternal(rotationKeys, time, glm::quat(1.0f, 0.0f, 0.0f, 0.0f));
 }
 
 glm::vec3 AnimationTrack::SampleScale(float time) const {
-    if (scaleKeys.empty()) return glm::vec3(1.0f);
-    if (scaleKeys.size() == 1 || time <= scaleKeys.front().time) return scaleKeys.front().value;
-    if (time >= scaleKeys.back().time) return scaleKeys.back().value;
-
-    for (size_t i = 0; i < scaleKeys.size() - 1; ++i) {
-        if (time >= scaleKeys[i].time && time <= scaleKeys[i + 1].time) {
-            float t = (time - scaleKeys[i].time) / (scaleKeys[i + 1].time - scaleKeys[i].time);
-            return glm::mix(scaleKeys[i].value, scaleKeys[i + 1].value, t);
-        }
-    }
-    return scaleKeys.front().value;
+    return SampleTrackInternal(scaleKeys, time, glm::vec3(1.0f));
 }
 
 AnimationTrack* AnimationClip::GetOrCreateTrack(const std::string& targetNodeName) {
@@ -51,43 +106,36 @@ AnimationTrack* AnimationClip::GetOrCreateTrack(const std::string& targetNodeNam
     return &tracks.back();
 }
 
-void AnimationClip::AddOrUpdatePositionKey(const std::string& targetNodeName, float time, const glm::vec3& position) {
+template<typename T>
+void AnimationClip::AddOrUpdateKey(const std::string& targetNodeName, float time, const T& value, InterpolationMode mode) {
     AnimationTrack* track = GetOrCreateTrack(targetNodeName);
     if (!track) return;
-    for (auto& k : track->positionKeys) {
-        if (std::abs(k.time - time) < 1e-4f) {
-            k.value = position;
-            return;
-        }
+    if constexpr (std::is_same_v<T, glm::vec3>) {
+        AddOrUpdateKeyInternal(track->positionKeys, time, value, mode);
+    } else if constexpr (std::is_same_v<T, glm::quat>) {
+        AddOrUpdateKeyInternal(track->rotationKeys, time, value, mode);
     }
-    track->positionKeys.push_back({time, position});
-    std::sort(track->positionKeys.begin(), track->positionKeys.end(), [](const auto& a, const auto& b) { return a.time < b.time; });
 }
 
-void AnimationClip::AddOrUpdateRotationKey(const std::string& targetNodeName, float time, const glm::quat& rotation) {
+template void AnimationClip::AddOrUpdateKey<glm::vec3>(const std::string&, float, const glm::vec3&, InterpolationMode);
+template void AnimationClip::AddOrUpdateKey<glm::quat>(const std::string&, float, const glm::quat&, InterpolationMode);
+
+void AnimationClip::AddOrUpdatePositionKey(const std::string& targetNodeName, float time, const glm::vec3& position, InterpolationMode mode) {
     AnimationTrack* track = GetOrCreateTrack(targetNodeName);
     if (!track) return;
-    for (auto& k : track->rotationKeys) {
-        if (std::abs(k.time - time) < 1e-4f) {
-            k.value = rotation;
-            return;
-        }
-    }
-    track->rotationKeys.push_back({time, rotation});
-    std::sort(track->rotationKeys.begin(), track->rotationKeys.end(), [](const auto& a, const auto& b) { return a.time < b.time; });
+    AddOrUpdateKeyInternal(track->positionKeys, time, position, mode);
 }
 
-void AnimationClip::AddOrUpdateScaleKey(const std::string& targetNodeName, float time, const glm::vec3& scale) {
+void AnimationClip::AddOrUpdateRotationKey(const std::string& targetNodeName, float time, const glm::quat& rotation, InterpolationMode mode) {
     AnimationTrack* track = GetOrCreateTrack(targetNodeName);
     if (!track) return;
-    for (auto& k : track->scaleKeys) {
-        if (std::abs(k.time - time) < 1e-4f) {
-            k.value = scale;
-            return;
-        }
-    }
-    track->scaleKeys.push_back({time, scale});
-    std::sort(track->scaleKeys.begin(), track->scaleKeys.end(), [](const auto& a, const auto& b) { return a.time < b.time; });
+    AddOrUpdateKeyInternal(track->rotationKeys, time, rotation, mode);
+}
+
+void AnimationClip::AddOrUpdateScaleKey(const std::string& targetNodeName, float time, const glm::vec3& scale, InterpolationMode mode) {
+    AnimationTrack* track = GetOrCreateTrack(targetNodeName);
+    if (!track) return;
+    AddOrUpdateKeyInternal(track->scaleKeys, time, scale, mode);
 }
 
 Timeline::Timeline() = default;
@@ -119,26 +167,20 @@ void Timeline::KeyframeNodePose(const SceneNode* node) {
     m_clip->AddOrUpdateScaleKey(node->name, m_currentTime, node->scale);
 }
 
-static SceneNode* FindNodeByName(SceneNode* node, const std::string& name) {
-    if (!node) return nullptr;
-    if (node->name == name) return node;
-    for (const auto& child : node->GetChildren()) {
-        SceneNode* found = FindNodeByName(child.get(), name);
-        if (found) return found;
-    }
-    return nullptr;
-}
-
 void Timeline::EvaluateAtTime(float time, SceneNode* rootSceneNode, Skeleton* skeleton) {
     if (!m_clip || !rootSceneNode) return;
 
+    std::unordered_map<std::string, SceneNode*> nodeIndex;
+    BuildNodeIndex(rootSceneNode, nodeIndex);
+
     for (const auto& track : m_clip->tracks) {
-        SceneNode* targetNode = FindNodeByName(rootSceneNode, track.targetNodeName);
+        auto it = nodeIndex.find(track.targetNodeName);
+        SceneNode* targetNode = (it != nodeIndex.end()) ? it->second : nullptr;
         if (targetNode) {
             if (!track.positionKeys.empty())
                 targetNode->position = track.SamplePosition(time);
             if (!track.rotationKeys.empty()) {
-                glm::quat q = track.SampleRotation(time);
+                glm::quat q = glm::normalize(track.SampleRotation(time));
                 targetNode->rotationDegrees = glm::degrees(glm::eulerAngles(q));
             }
             if (!track.scaleKeys.empty())

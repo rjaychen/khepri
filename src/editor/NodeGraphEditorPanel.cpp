@@ -4,6 +4,8 @@
 
 #include "NodeGraphEditorPanel.h"
 #include "../graph/GeometryNodes.h"
+#include "../graph/NodeGraphCommand.h"
+#include "../core/UndoStack.h"
 #include "../scene/SceneNode.h"
 #include "../core/Logger.h"
 #include <imgui_internal.h>
@@ -97,6 +99,12 @@ void NodeGraphEditorPanel::SetTargetSceneNode(SceneNode* targetNode) {
     }
 }
 
+void NodeGraphEditorPanel::ValidateTargetSceneNode(const SceneNode* rootNode) noexcept {
+    if (m_targetSceneNode && (!rootNode || !rootNode->Contains(m_targetSceneNode))) {
+        SetTargetSceneNode(nullptr);
+    }
+}
+
 bool NodeGraphEditorPanel::AutoConnectNodePin(uint32_t sourcePinId, uint32_t newNodeId) {
     if (!m_graph) return false;
     const GraphPin* srcPin = m_graph->FindPin(sourcePinId);
@@ -106,25 +114,31 @@ bool NodeGraphEditorPanel::AutoConnectNodePin(uint32_t sourcePinId, uint32_t new
     if (srcPin->direction == PinDirection::Output) {
         for (const auto& inPin : newNode->GetInputs()) {
             if (inPin.type == srcPin->type) {
-                if (m_graph->Connect(srcPin->id, inPin.id)) {
-                    m_graph->Evaluate();
-                    if (m_targetSceneNode) {
-                        m_targetSceneNode->mesh = GetActiveOutputMesh();
-                    }
-                    return true;
+                if (m_undoStack) {
+                    m_undoStack->PushAndExecute(std::make_unique<ConnectPinsCommand>(m_graph.get(), srcPin->id, inPin.id));
+                } else {
+                    if (!m_graph->Connect(srcPin->id, inPin.id)) return false;
                 }
+                m_graph->Evaluate();
+                if (m_targetSceneNode) {
+                    m_targetSceneNode->mesh = GetActiveOutputMesh();
+                }
+                return true;
             }
         }
     } else {
         for (const auto& outPin : newNode->GetOutputs()) {
             if (outPin.type == srcPin->type) {
-                if (m_graph->Connect(outPin.id, srcPin->id)) {
-                    m_graph->Evaluate();
-                    if (m_targetSceneNode) {
-                        m_targetSceneNode->mesh = GetActiveOutputMesh();
-                    }
-                    return true;
+                if (m_undoStack) {
+                    m_undoStack->PushAndExecute(std::make_unique<ConnectPinsCommand>(m_graph.get(), outPin.id, srcPin->id));
+                } else {
+                    if (!m_graph->Connect(outPin.id, srcPin->id)) return false;
                 }
+                m_graph->Evaluate();
+                if (m_targetSceneNode) {
+                    m_targetSceneNode->mesh = GetActiveOutputMesh();
+                }
+                return true;
             }
         }
     }
@@ -573,7 +587,7 @@ void NodeGraphEditorPanel::RenderNodeCanvas() {
         float extraHeight = 0.0f;
         if (std::dynamic_pointer_cast<MeshPrimitiveNode>(node)) {
             extraHeight = 36.0f * m_zoom;
-
+        }
 
         float nodeWidth = 240.0f * m_zoom;
         if (std::dynamic_pointer_cast<Vector3Node>(node)) {
@@ -648,13 +662,21 @@ void NodeGraphEditorPanel::RenderNodeCanvas() {
         }
 
         if (ImGui::IsItemActive() && ImGui::IsMouseDragging(ImGuiMouseButton_Left, 0.0f)) {
-            const ImVec2 delta = ImGui::GetIO().MouseDelta;
-            const float dx = delta.x / m_zoom;
-            const float dy = delta.y / m_zoom;
-
             if (!isSelected) {
                 SelectNode(id, false);
             }
+
+            if (!m_isDraggingNodes) {
+                m_isDraggingNodes = true;
+                m_dragStartNodePositions.clear();
+                for (uint32_t selId : m_selectedNodeIds) {
+                    m_dragStartNodePositions[selId] = GetNodePosition(selId);
+                }
+            }
+
+            const ImVec2 delta = ImGui::GetIO().MouseDelta;
+            const float dx = delta.x / m_zoom;
+            const float dy = delta.y / m_zoom;
 
             // Translate all selected nodes synchronously
             for (uint32_t selId : m_selectedNodeIds) {
@@ -708,7 +730,10 @@ void NodeGraphEditorPanel::RenderNodeCanvas() {
                     if (inPin.name == "Level") {
                         auto subdivNode = std::dynamic_pointer_cast<SubdivisionNode>(node);
                         int level = subdivNode ? static_cast<int>(subdivNode->GetSubdivisionLevel()) :
-                                    (std::holds_alternative<float>(inPin.value) ? static_cast<int>(std::get<float>(inPin.value)) : 0);
+                                    std::visit(OverloadedVisitor{
+                                        [](float f) { return static_cast<int>(f); },
+                                        [](auto&&) { return 0; }
+                                    }, inPin.value);
                         if (ImGui::DragInt("##PinLvl", &level, 1, 0, 5, "Lvl: %d")) {
                             inPin.value = static_cast<float>(level);
                             if (subdivNode) subdivNode->SetSubdivisionLevel(static_cast<uint32_t>(level));
@@ -718,7 +743,10 @@ void NodeGraphEditorPanel::RenderNodeCanvas() {
                     } else if (inPin.name == "Angle") {
                         auto twistNode = std::dynamic_pointer_cast<TwistDeformerNode>(node);
                         float angle = twistNode ? twistNode->GetAngle() :
-                                      (std::holds_alternative<float>(inPin.value) ? std::get<float>(inPin.value) : 0.0f);
+                                      std::visit(OverloadedVisitor{
+                                          [](float f) { return f; },
+                                          [](auto&&) { return 0.0f; }
+                                      }, inPin.value);
                         if (ImGui::DragFloat("##PinAngle", &angle, 1.0f, -360.0f, 360.0f, "%.1f°")) {
                             inPin.value = angle;
                             if (twistNode) twistNode->SetAngle(angle);
@@ -726,7 +754,10 @@ void NodeGraphEditorPanel::RenderNodeCanvas() {
                             if (m_targetSceneNode) m_targetSceneNode->mesh = GetActiveOutputMesh();
                         }
                     } else {
-                        float val = std::holds_alternative<float>(inPin.value) ? std::get<float>(inPin.value) : 0.0f;
+                        float val = std::visit(OverloadedVisitor{
+                            [](float f) { return f; },
+                            [](auto&&) { return 0.0f; }
+                        }, inPin.value);
                         if (ImGui::DragFloat("##PinFloat", &val, 0.05f, -1000.0f, 1000.0f, "%.2f")) {
                             inPin.value = val;
                             m_graph->Evaluate();
@@ -741,7 +772,10 @@ void NodeGraphEditorPanel::RenderNodeCanvas() {
                     ImGui::SetCursorScreenPos(ImVec2(widgetX, currentPinY - 10.0f * m_zoom));
                     ImGui::SetNextItemWidth(125.0f * m_zoom);
                     ImGui::PushID(static_cast<int>(inPin.id));
-                    glm::vec3 vec = std::holds_alternative<glm::vec3>(inPin.value) ? std::get<glm::vec3>(inPin.value) : glm::vec3(0.0f);
+                    glm::vec3 vec = std::visit(OverloadedVisitor{
+                        [](const glm::vec3& v) { return v; },
+                        [](auto&&) { return glm::vec3(0.0f); }
+                    }, inPin.value);
                     if (ImGui::DragFloat3("##PinVec3", &vec.x, 0.05f, -1000.0f, 1000.0f, "%.1f")) {
                         inPin.value = vec;
                         m_graph->Evaluate();
@@ -822,7 +856,7 @@ void NodeGraphEditorPanel::RenderNodeCanvas() {
                 m_graph->Evaluate();
                 if (m_targetSceneNode) m_targetSceneNode->mesh = GetActiveOutputMesh();
             }
-
+        }
 
         ImGui::PopID();
     }
@@ -862,6 +896,28 @@ void NodeGraphEditorPanel::RenderNodeCanvas() {
         }
     }
 
+    // Commit node movement command to UndoStack upon mouse release
+    if (m_isDraggingNodes && !ImGui::IsMouseDown(ImGuiMouseButton_Left)) {
+        if (m_undoStack) {
+            std::vector<graph::MoveNodesCommand::NodePositionRecord> records;
+            for (const auto& [selId, startPos] : m_dragStartNodePositions) {
+                ImVec2 curPos = GetNodePosition(selId);
+                if (std::abs(curPos.x - startPos.x) > 1e-4f || std::abs(curPos.y - startPos.y) > 1e-4f) {
+                    records.push_back({
+                        selId,
+                        glm::vec2(startPos.x, startPos.y),
+                        glm::vec2(curPos.x, curPos.y)
+                    });
+                }
+            }
+            if (!records.empty()) {
+                m_undoStack->Push(std::make_unique<graph::MoveNodesCommand>(&m_nodePositions, std::move(records)));
+            }
+        }
+        m_isDraggingNodes = false;
+        m_dragStartNodePositions.clear();
+    }
+
     // 6. Process Link Drag Drop Release / Auto-Wiring
     if (m_isDraggingLink && !ImGui::IsMouseDown(ImGuiMouseButton_Left)) {
         if (hoveredTargetPinId != 0 && hoveredTargetPinId != m_dragStartPinId) {
@@ -870,11 +926,14 @@ void NodeGraphEditorPanel::RenderNodeCanvas() {
             if (startPin && targetPin && startPin->direction != targetPin->direction) {
                 const uint32_t outId = (startPin->direction == PinDirection::Output) ? startPin->id : targetPin->id;
                 const uint32_t inId  = (startPin->direction == PinDirection::Input) ? startPin->id : targetPin->id;
-                if (m_graph->Connect(outId, inId)) {
-                    m_graph->Evaluate();
-                    if (m_targetSceneNode) {
-                        m_targetSceneNode->mesh = GetActiveOutputMesh();
-                    }
+                if (m_undoStack) {
+                    m_undoStack->PushAndExecute(std::make_unique<ConnectPinsCommand>(m_graph.get(), outId, inId));
+                } else {
+                    (void)m_graph->Connect(outId, inId);
+                }
+                m_graph->Evaluate();
+                if (m_targetSceneNode) {
+                    m_targetSceneNode->mesh = GetActiveOutputMesh();
                 }
             }
         } else if (hoveredTargetPinId == 0) {
@@ -885,6 +944,40 @@ void NodeGraphEditorPanel::RenderNodeCanvas() {
         }
         m_isDraggingLink = false;
     }
+
+    auto spawnNode = [&](auto createFn, const ImVec2& pos) {
+        auto node = createFn();
+        m_nodePositions[node->GetId()] = pos;
+        if (m_undoStack) {
+            m_undoStack->Push(std::make_unique<AddNodeCommand>(m_graph.get(), node, &m_nodePositions, pos));
+        }
+        SelectNode(node->GetId(), false);
+        m_graph->Evaluate();
+        if (m_targetSceneNode) m_targetSceneNode->mesh = GetActiveOutputMesh();
+        return node;
+    };
+
+    auto deleteSelectedNodes = [&]() {
+        if (m_selectedNodeIds.empty()) return;
+        if (m_undoStack) {
+            core::ScopedTransaction tx(*m_undoStack, "Delete Selected Nodes");
+            for (uint32_t delId : m_selectedNodeIds) {
+                if (auto node = m_graph->GetNode(delId)) {
+                    if (m_previewNodeId == delId) m_previewNodeId = 0;
+                    m_undoStack->PushAndExecute(std::make_unique<DeleteNodeCommand>(m_graph.get(), node, &m_nodePositions));
+                }
+            }
+        } else {
+            for (uint32_t delId : m_selectedNodeIds) {
+                if (m_previewNodeId == delId) m_previewNodeId = 0;
+                m_graph->RemoveNode(delId);
+                m_nodePositions.erase(delId);
+            }
+        }
+        ClearSelection();
+        m_graph->Evaluate();
+        if (m_targetSceneNode) m_targetSceneNode->mesh = GetActiveOutputMesh();
+    };
 
     // Open Pin Drop Context Menu when wire released over empty space
     if (m_openPinDropPopup) {
@@ -901,9 +994,7 @@ void NodeGraphEditorPanel::RenderNodeCanvas() {
         const graph::PinDirection droppedDir   = droppedPin ? droppedPin->direction : graph::PinDirection::Output;
 
         auto spawnAndConnect = [&](auto createFn) {
-            auto node = createFn();
-            m_nodePositions[node->GetId()] = m_droppedCanvasPos;
-            SelectNode(node->GetId(), false);
+            auto node = spawnNode(createFn, m_droppedCanvasPos);
             AutoConnectNodePin(m_droppedPinId, node->GetId());
         };
 
@@ -970,36 +1061,20 @@ void NodeGraphEditorPanel::RenderNodeCanvas() {
 
         if (ImGui::BeginMenu("Primitives")) {
             if (ImGui::MenuItem("+ Cube")) {
-                auto node = m_graph->CreateNode<MeshPrimitiveNode>(&m_context, MeshPrimitiveNode::PrimitiveType::Cube);
-                m_nodePositions[node->GetId()] = spawnCanvasPos;
-                SelectNode(node->GetId(), false);
-                m_graph->Evaluate();
-                if (m_targetSceneNode) m_targetSceneNode->mesh = GetActiveOutputMesh();
+                spawnNode([&]{ return m_graph->CreateNode<MeshPrimitiveNode>(&m_context, MeshPrimitiveNode::PrimitiveType::Cube); }, spawnCanvasPos);
             }
             if (ImGui::MenuItem("+ Sphere")) {
-                auto node = m_graph->CreateNode<MeshPrimitiveNode>(&m_context, MeshPrimitiveNode::PrimitiveType::Sphere);
-                m_nodePositions[node->GetId()] = spawnCanvasPos;
-                SelectNode(node->GetId(), false);
-                m_graph->Evaluate();
-                if (m_targetSceneNode) m_targetSceneNode->mesh = GetActiveOutputMesh();
+                spawnNode([&]{ return m_graph->CreateNode<MeshPrimitiveNode>(&m_context, MeshPrimitiveNode::PrimitiveType::Sphere); }, spawnCanvasPos);
             }
             ImGui::EndMenu();
         }
 
         if (ImGui::BeginMenu("Deformers")) {
             if (ImGui::MenuItem("+ Subdivision Node")) {
-                auto node = m_graph->CreateNode<SubdivisionNode>(&m_context, 2);
-                m_nodePositions[node->GetId()] = spawnCanvasPos;
-                SelectNode(node->GetId(), false);
-                m_graph->Evaluate();
-                if (m_targetSceneNode) m_targetSceneNode->mesh = GetActiveOutputMesh();
+                spawnNode([&]{ return m_graph->CreateNode<SubdivisionNode>(&m_context, 2); }, spawnCanvasPos);
             }
             if (ImGui::MenuItem("+ Twist Deformer Node")) {
-                auto node = m_graph->CreateNode<TwistDeformerNode>(&m_context);
-                m_nodePositions[node->GetId()] = spawnCanvasPos;
-                SelectNode(node->GetId(), false);
-                m_graph->Evaluate();
-                if (m_targetSceneNode) m_targetSceneNode->mesh = GetActiveOutputMesh();
+                spawnNode([&]{ return m_graph->CreateNode<TwistDeformerNode>(&m_context); }, spawnCanvasPos);
             }
 
             ImGui::EndMenu();
@@ -1007,16 +1082,10 @@ void NodeGraphEditorPanel::RenderNodeCanvas() {
 
         if (ImGui::BeginMenu("Value Nodes")) {
             if (ImGui::MenuItem("+ Float Value Node")) {
-                auto node = m_graph->CreateNode<FloatNode>(1.0f);
-                m_nodePositions[node->GetId()] = spawnCanvasPos;
-                SelectNode(node->GetId(), false);
-                m_graph->Evaluate();
+                spawnNode([&]{ return m_graph->CreateNode<FloatNode>(1.0f); }, spawnCanvasPos);
             }
             if (ImGui::MenuItem("+ Vector3 Value Node")) {
-                auto node = m_graph->CreateNode<Vector3Node>(glm::vec3(0.0f));
-                m_nodePositions[node->GetId()] = spawnCanvasPos;
-                SelectNode(node->GetId(), false);
-                m_graph->Evaluate();
+                spawnNode([&]{ return m_graph->CreateNode<Vector3Node>(glm::vec3(0.0f)); }, spawnCanvasPos);
             }
             ImGui::EndMenu();
         }
@@ -1024,13 +1093,7 @@ void NodeGraphEditorPanel::RenderNodeCanvas() {
         if (!m_selectedNodeIds.empty()) {
             ImGui::Separator();
             if (ImGui::MenuItem("Delete Selected Nodes")) {
-                for (uint32_t delId : m_selectedNodeIds) {
-                    m_graph->RemoveNode(delId);
-                    m_nodePositions.erase(delId);
-                }
-                ClearSelection();
-                m_graph->Evaluate();
-                if (m_targetSceneNode) m_targetSceneNode->mesh = GetActiveOutputMesh();
+                deleteSelectedNodes();
             }
         }
         ImGui::EndPopup();
@@ -1038,17 +1101,10 @@ void NodeGraphEditorPanel::RenderNodeCanvas() {
 
     // 8. Delete Key Shortcut for Selected Nodes
     if (!m_selectedNodeIds.empty() && (ImGui::IsKeyPressed(ImGuiKey_Delete) || ImGui::IsKeyPressed(ImGuiKey_Backspace))) {
-        for (uint32_t delId : m_selectedNodeIds) {
-            m_graph->RemoveNode(delId);
-            m_nodePositions.erase(delId);
-        }
-        ClearSelection();
-        m_graph->Evaluate();
-        if (m_targetSceneNode) m_targetSceneNode->mesh = GetActiveOutputMesh();
+        deleteSelectedNodes();
     }
 
     drawList->PopClipRect();
 }
 
 } // namespace khepri
-

@@ -20,6 +20,7 @@
 #include "NodeGraphEditorPanel.h"
 #include "AssetManagerPanel.h"
 #include "OracleBridge.h"
+#include "../core/UndoStack.h"
 
 #include <imgui.h>
 #include <imgui_impl_glfw.h>
@@ -45,6 +46,9 @@ public:
     void ImportModelIntoScene(const std::string& path);
     void LoadGLTFModel(const std::string& path) { OpenSceneModel(path); }
     void LoadSampleModel(const std::string& name);
+
+    [[nodiscard]] khepri::core::UndoStack& GetUndoStack() noexcept { return m_undoStack; }
+    [[nodiscard]] const khepri::core::UndoStack& GetUndoStack() const noexcept { return m_undoStack; }
 
 private:
     void InitImGui();
@@ -84,8 +88,8 @@ private:
     Camera m_camera;
     std::shared_ptr<SceneNode> m_rootNode;
     std::shared_ptr<MeshComponent> m_activeDisplayMesh; // tracked for inspector/camera focus
-    std::shared_ptr<MeshComponent> m_lightGizmoMesh;    // shared gizmo for light visualization
     Timeline m_timeline;
+    khepri::core::UndoStack m_undoStack;
 
     // Viewport Texture Descriptor Set for ImGui (owned & updated by ViewportPanel::RenderUI)
     VkDescriptorSet m_viewportDS = VK_NULL_HANDLE;

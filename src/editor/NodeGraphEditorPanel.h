@@ -15,6 +15,8 @@
 
 class SceneNode;
 
+namespace khepri::core { class UndoStack; }
+
 namespace khepri {
 
 class NodeGraphEditorPanel {
@@ -25,12 +27,19 @@ public:
     NodeGraphEditorPanel(const NodeGraphEditorPanel&) = delete;
     NodeGraphEditorPanel& operator=(const NodeGraphEditorPanel&) = delete;
 
+    void SetUndoStack(core::UndoStack* undoStack) noexcept { m_undoStack = undoStack; }
+    [[nodiscard]] core::UndoStack* GetUndoStack() const noexcept { return m_undoStack; }
+
     void RenderUI(std::shared_ptr<MeshComponent>& activeDisplayMesh);
     void SetImportedMesh(std::shared_ptr<MeshComponent> importedMesh);
 
     // Target SceneNode binding
     void SetTargetSceneNode(SceneNode* targetNode);
     [[nodiscard]] SceneNode* GetTargetSceneNode() const noexcept { return m_targetSceneNode; }
+    void ValidateTargetSceneNode(const SceneNode* rootNode) noexcept;
+
+    [[nodiscard]] std::unordered_map<uint32_t, ImVec2>& GetNodePositionsMap() noexcept { return m_nodePositions; }
+    [[nodiscard]] const std::unordered_map<uint32_t, ImVec2>& GetNodePositionsMap() const noexcept { return m_nodePositions; }
 
     // Returns the current active output mesh produced by the graph (for viewport display)
     [[nodiscard]] std::shared_ptr<MeshComponent> GetActiveOutputMesh() const noexcept;
@@ -95,6 +104,10 @@ private:
     ImVec2 m_boxSelectStart{0.0f, 0.0f};
     ImVec2 m_boxSelectEnd{0.0f, 0.0f};
 
+    // Node Drag Movement State for Undo
+    bool m_isDraggingNodes{false};
+    std::unordered_map<uint32_t, ImVec2> m_dragStartNodePositions;
+
     // Interactive Wiring Drag State
     bool m_isDraggingLink{false};
     uint32_t m_dragStartPinId{0};
@@ -104,6 +117,8 @@ private:
     bool m_openPinDropPopup{false};
     uint32_t m_droppedPinId{0};
     ImVec2 m_droppedCanvasPos{0.0f, 0.0f};
+
+    core::UndoStack* m_undoStack{nullptr};
 };
 
 } // namespace khepri

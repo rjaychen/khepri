@@ -31,9 +31,10 @@ TEST_F(ModelImporterTest, ImportsOBJModelFromDisk) {
     }
 
     VulkanContext* nullContext = nullptr;
-    auto rootNode = ModelImporter::LoadFromFile(*nullContext, filename);
+    auto rootNodeResult = ModelImporter::LoadFromFile(*nullContext, filename);
 
-    ASSERT_NE(rootNode, nullptr);
+    ASSERT_TRUE(rootNodeResult.has_value());
+    auto rootNode = rootNodeResult.value();
     const auto& children = rootNode->GetChildren();
     ASSERT_EQ(children.size(), 1u);
     ASSERT_NE(children[0]->mesh, nullptr);
@@ -60,9 +61,10 @@ TEST_F(ModelImporterTest, ImportsASCIIAndBinarySTLModelFromDisk) {
     }
 
     VulkanContext* nullContext = nullptr;
-    auto rootNode = ModelImporter::LoadFromFile(*nullContext, filename);
+    auto rootNodeResult = ModelImporter::LoadFromFile(*nullContext, filename);
 
-    ASSERT_NE(rootNode, nullptr);
+    ASSERT_TRUE(rootNodeResult.has_value());
+    auto rootNode = rootNodeResult.value();
     const auto& children = rootNode->GetChildren();
     ASSERT_EQ(children.size(), 1u);
     ASSERT_NE(children[0]->mesh, nullptr);
@@ -75,17 +77,19 @@ TEST_F(ModelImporterTest, ImportsASCIIAndBinarySTLModelFromDisk) {
 
 TEST_F(ModelImporterTest, ImportsGLTFModelFromDisk) {
     VulkanContext* nullContext = nullptr;
-    auto rootNode = ModelImporter::LoadFromFile(*nullContext, "assets/models/Box.gltf");
+    auto rootNodeResult = ModelImporter::LoadFromFile(*nullContext, "assets/models/Box.gltf");
 
-    ASSERT_NE(rootNode, nullptr);
+    ASSERT_TRUE(rootNodeResult.has_value());
+    auto rootNode = rootNodeResult.value();
     const auto& children = rootNode->GetChildren();
     EXPECT_FALSE(children.empty());
 }
 
 TEST_F(ModelImporterTest, HandlesInvalidOrNonExistentFilesGracefully) {
     VulkanContext* nullContext = nullptr;
-    auto rootNode = ModelImporter::LoadFromFile(*nullContext, "non_existent_file.xyz");
-    EXPECT_EQ(rootNode, nullptr);
+    auto res1 = ModelImporter::LoadFromFile(*nullContext, "non_existent_file.xyz");
+    EXPECT_FALSE(res1.has_value());
+    EXPECT_EQ(res1.error(), khepri::ImportError::FileNotFound);
 }
 
 TEST_F(ModelImporterTest, OBJParserHandlesNegativeRelativeIndices) {
@@ -100,9 +104,10 @@ TEST_F(ModelImporterTest, OBJParserHandlesNegativeRelativeIndices) {
 
     VulkanContext* nullContext = nullptr;
     OBJImporter importer;
-    auto rootNode = importer.Import(*nullContext, filename);
+    auto rootNodeResult = importer.Import(*nullContext, filename);
 
-    ASSERT_NE(rootNode, nullptr);
+    ASSERT_TRUE(rootNodeResult.has_value());
+    auto rootNode = rootNodeResult.value();
     const auto& children = rootNode->GetChildren();
     ASSERT_EQ(children.size(), 1u);
     EXPECT_EQ(children[0]->mesh->GetVertices().size(), 3u);
@@ -120,8 +125,9 @@ TEST_F(ModelImporterTest, OpenSceneVsImportModelHierarchyBehavior) {
     ASSERT_EQ(initialScene->GetChildren().size(), 1u);
 
     // 1. Simulate Import Model (appends child node, preserves existing nodes)
-    auto importedNode = ModelImporter::LoadFromFile(*nullContext, "assets/models/Box.gltf");
-    ASSERT_NE(importedNode, nullptr);
+    auto importedResult = ModelImporter::LoadFromFile(*nullContext, "assets/models/Box.gltf");
+    ASSERT_TRUE(importedResult.has_value());
+    auto importedNode = importedResult.value();
 
     auto childToAdd = std::make_unique<SceneNode>(importedNode->name);
     initialScene->AddChild(std::move(childToAdd));
@@ -131,10 +137,51 @@ TEST_F(ModelImporterTest, OpenSceneVsImportModelHierarchyBehavior) {
     EXPECT_NE(initialScene->GetChildren()[1], nullptr);
 
     // 2. Simulate Open Scene (replaces entire scene root)
-    auto openedSceneNode = ModelImporter::LoadFromFile(*nullContext, "assets/models/Box.gltf");
-    ASSERT_NE(openedSceneNode, nullptr);
+    auto openedResult = ModelImporter::LoadFromFile(*nullContext, "assets/models/Box.gltf");
+    ASSERT_TRUE(openedResult.has_value());
+    auto openedSceneNode = openedResult.value();
     initialScene = openedSceneNode;
 
     EXPECT_NE(initialScene->name, "Scene Root");
+}
+
+TEST_F(ModelImporterTest, DataDrivenRegistryAndCustomRegistration) {
+    const auto& registry = ModelImporter::GetRegistry();
+    EXPECT_GE(registry.size(), 3u); // .gltf/.glb, .obj, .stl
+
+    class MockCustomImporter : public ModelImporter {
+    public:
+        [[nodiscard]] bool CanImport(const std::string& path) const override {
+            return path.ends_with(".custom");
+        }
+        [[nodiscard]] std::expected<std::shared_ptr<SceneNode>, khepri::ImportError> Import(
+            VulkanContext&, const std::string&, VkDescriptorSetLayout, DescriptorAllocator*, VkBuffer) override {
+            return std::make_shared<SceneNode>("MockCustomNode");
+        }
+    };
+
+    ModelImporter::RegisterImporter({".custom"}, []() -> std::unique_ptr<ModelImporter> {
+        return std::make_unique<MockCustomImporter>();
+    });
+
+    const auto& updatedReg = ModelImporter::GetRegistry();
+    bool foundCustom = false;
+    for (const auto& entry : updatedReg) {
+        for (const auto& ext : entry.extensions) {
+            if (ext == ".custom") foundCustom = true;
+        }
+    }
+    EXPECT_TRUE(foundCustom);
+}
+
+TEST_F(ModelImporterTest, ErrorTaxonomyStringHelpers) {
+    EXPECT_EQ(khepri::ToString(khepri::ImportError::None), "None");
+    EXPECT_EQ(khepri::ToString(khepri::ImportError::FileNotFound), "File not found");
+    EXPECT_EQ(khepri::ToString(khepri::ImportError::UnsupportedFormat), "Unsupported file format or extension");
+    EXPECT_EQ(khepri::ToString(khepri::ImportError::ParsingFailed), "Parsing failed");
+
+    EXPECT_EQ(khepri::ToString(khepri::VulkanError::None), "None");
+    EXPECT_EQ(khepri::ToString(khepri::VulkanError::InitializationFailed), "Vulkan initialization failed");
+    EXPECT_EQ(khepri::ToString(khepri::VulkanError::DeviceLost), "Vulkan device lost");
 }
 

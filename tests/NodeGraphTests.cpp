@@ -135,8 +135,8 @@ TEST(NodeGraphTest, NodeGraphDataflowPipelineConnection) {
     ASSERT_NE(subNode->FindOutput("SubdividedMeshBuffer"), nullptr);
     ASSERT_NE(twistNode->FindInput("MeshBuffer"), nullptr);
 
-    EXPECT_TRUE(graph.Connect(primNode->FindOutput("MeshBuffer")->id, subNode->FindInput("MeshBuffer")->id));
-    EXPECT_TRUE(graph.Connect(subNode->FindOutput("SubdividedMeshBuffer")->id, twistNode->FindInput("MeshBuffer")->id));
+    EXPECT_TRUE(graph.Connect(primNode->FindOutput("MeshBuffer")->id, subNode->FindInput("MeshBuffer")->id).has_value());
+    EXPECT_TRUE(graph.Connect(subNode->FindOutput("SubdividedMeshBuffer")->id, twistNode->FindInput("MeshBuffer")->id).has_value());
 
     twistNode->SetAngle(90.0f);
     EXPECT_FLOAT_EQ(twistNode->GetAngle(), 90.0f);
@@ -247,14 +247,52 @@ TEST(NodeGraphTest, CyclePreventionRejectsLoopingConnections) {
     ASSERT_NE(inA, nullptr);
 
     // Connect A -> B -> C
-    EXPECT_TRUE(graph.Connect(outA->id, inB->id));
-    EXPECT_TRUE(graph.Connect(outB->id, inC->id));
+    EXPECT_TRUE(graph.Connect(outA->id, inB->id).has_value());
+    EXPECT_TRUE(graph.Connect(outB->id, inC->id).has_value());
 
-    // Connecting C -> A would form a cycle (A -> B -> C -> A), must return false!
-    EXPECT_FALSE(graph.Connect(outC->id, inA->id));
+    // Connecting C -> A would form a cycle (A -> B -> C -> A), must return CycleDetected!
+    auto cycleRes = graph.Connect(outC->id, inA->id);
+    EXPECT_FALSE(cycleRes.has_value());
+    EXPECT_EQ(cycleRes.error(), ConnectError::CycleDetected);
 
-    // Self-loop (A -> A) must return false!
-    EXPECT_FALSE(graph.Connect(outA->id, inA->id));
+    // Self-loop (A -> A) must return SameNodeSelfLoop!
+    auto loopRes = graph.Connect(outA->id, inA->id);
+    EXPECT_FALSE(loopRes.has_value());
+    EXPECT_EQ(loopRes.error(), ConnectError::SameNodeSelfLoop);
+}
+
+TEST(NodeGraphTest, ConnectErrorDetailedFailures) {
+    NodeGraph graph;
+
+    auto floatNode = graph.CreateNode<FloatNode>(1.0f);
+    auto twistNode = graph.CreateNode<TwistDeformerNode>();
+
+    auto* floatOut = floatNode->FindOutput("Value");
+    auto* twistMeshIn = twistNode->FindInput("MeshBuffer");
+    auto* twistAngleIn = twistNode->FindInput("Angle");
+
+    ASSERT_NE(floatOut, nullptr);
+    ASSERT_NE(twistMeshIn, nullptr);
+    ASSERT_NE(twistAngleIn, nullptr);
+
+    // 1. Pin Not Found
+    auto errNotFound = graph.Connect(99999, twistAngleIn->id);
+    EXPECT_FALSE(errNotFound.has_value());
+    EXPECT_EQ(errNotFound.error(), ConnectError::PinNotFound);
+
+    // 2. Invalid Direction (Input to Input)
+    auto errDirection = graph.Connect(twistMeshIn->id, twistAngleIn->id);
+    EXPECT_FALSE(errDirection.has_value());
+    EXPECT_EQ(errDirection.error(), ConnectError::InvalidDirection);
+
+    // 3. Type Mismatch (Float to GeometryBuffer)
+    auto errType = graph.Connect(floatOut->id, twistMeshIn->id);
+    EXPECT_FALSE(errType.has_value());
+    EXPECT_EQ(errType.error(), ConnectError::TypeMismatch);
+
+    // 4. Compatible connection succeeds
+    auto okConnect = graph.Connect(floatOut->id, twistAngleIn->id);
+    EXPECT_TRUE(okConnect.has_value());
 }
 
 TEST(NodeGraphTest, DownstreamDirtyFlagPropagationOnParameterMutationAndDisconnect) {
@@ -264,8 +302,8 @@ TEST(NodeGraphTest, DownstreamDirtyFlagPropagationOnParameterMutationAndDisconne
     auto subNode   = graph.CreateNode<SubdivisionNode>(nullptr, 1);
     auto twistNode = graph.CreateNode<TwistDeformerNode>(nullptr);
 
-    EXPECT_TRUE(graph.Connect(primNode->FindOutput("MeshBuffer")->id, subNode->FindInput("MeshBuffer")->id));
-    EXPECT_TRUE(graph.Connect(subNode->FindOutput("SubdividedMeshBuffer")->id, twistNode->FindInput("MeshBuffer")->id));
+    EXPECT_TRUE(graph.Connect(primNode->FindOutput("MeshBuffer")->id, subNode->FindInput("MeshBuffer")->id).has_value());
+    EXPECT_TRUE(graph.Connect(subNode->FindOutput("SubdividedMeshBuffer")->id, twistNode->FindInput("MeshBuffer")->id).has_value());
 
     graph.Evaluate();
 
@@ -338,7 +376,8 @@ TEST(NodeGraphTest, GetOutputMeshVirtualDispatchReturnsGeometryForGeometryNodes)
 
     // Chain: primitive -> subdivide -> twist (headless, no Vulkan context)
     if (primNode->FindOutput("MeshBuffer") && subdivNode->FindInput("MeshBuffer")) {
-        graph.Connect(primNode->FindOutput("MeshBuffer")->id, subdivNode->FindInput("MeshBuffer")->id);
+        auto connRes = graph.Connect(primNode->FindOutput("MeshBuffer")->id, subdivNode->FindInput("MeshBuffer")->id);
+        EXPECT_TRUE(connRes.has_value());
     }
 
     graph.Evaluate();

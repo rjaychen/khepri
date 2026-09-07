@@ -48,6 +48,9 @@ void Swapchain::Cleanup() {
 }
 
 void Swapchain::Recreate(uint32_t width, uint32_t height) {
+    if (width == 0 || height == 0) {
+        return;
+    }
     m_context.WaitIdle();
     Cleanup();
     CreateSwapchain(width, height);

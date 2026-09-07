@@ -5,29 +5,47 @@
 #include <unordered_map>
 #include <cstdint>
 #include <limits>
+#include <span>
+#include "../core/StrongId.h"
 #include "../scene/MeshComponent.h"
+
+namespace khepri {
+
+struct VertexTag {};
+struct HalfEdgeTag {};
+struct FaceTag {};
+
+using VertexId   = StrongId<VertexTag, uint32_t>;
+using HalfEdgeId = StrongId<HalfEdgeTag, uint32_t>;
+using FaceId     = StrongId<FaceTag, uint32_t>;
+
+inline constexpr VertexId   InvalidVertexId   = VertexId::Invalid();
+inline constexpr HalfEdgeId InvalidHalfEdgeId = HalfEdgeId::Invalid();
+inline constexpr FaceId     InvalidFaceId     = FaceId::Invalid();
+
+} // namespace khepri
 
 constexpr uint32_t INVALID_INDEX = std::numeric_limits<uint32_t>::max();
 
 struct HE_Vertex {
-    uint32_t id = INVALID_INDEX;
+    khepri::VertexId id = khepri::InvalidVertexId;
     glm::vec3 position{0.0f};
     glm::vec3 normal{0.0f, 1.0f, 0.0f};
     glm::vec2 uv{0.0f, 0.0f};
-    uint32_t halfEdge = INVALID_INDEX; // Outgoing half-edge index
+    khepri::HalfEdgeId halfEdge = khepri::InvalidHalfEdgeId; // Outgoing half-edge
 };
 
 struct HE_HalfEdge {
-    uint32_t id = INVALID_INDEX;
-    uint32_t origin = INVALID_INDEX; // Origin vertex index
-    uint32_t twin = INVALID_INDEX;   // Twin half-edge index
-    uint32_t next = INVALID_INDEX;   // Next half-edge index
-    uint32_t face = INVALID_INDEX;   // Face index
+    khepri::HalfEdgeId id = khepri::InvalidHalfEdgeId;
+    khepri::VertexId origin = khepri::InvalidVertexId;      // Origin vertex
+    khepri::HalfEdgeId twin = khepri::InvalidHalfEdgeId;    // Twin half-edge
+    khepri::HalfEdgeId next = khepri::InvalidHalfEdgeId;    // Next half-edge
+    khepri::FaceId face = khepri::InvalidFaceId;            // Face
 };
 
 struct HE_Face {
-    uint32_t id = INVALID_INDEX;
-    uint32_t halfEdge = INVALID_INDEX; // Boundary half-edge index
+    khepri::FaceId id = khepri::InvalidFaceId;
+    khepri::HalfEdgeId halfEdge = khepri::InvalidHalfEdgeId; // Boundary half-edge
     glm::vec3 normal{0.0f, 1.0f, 0.0f};
 };
 
@@ -45,21 +63,43 @@ public:
         BakeToRenderMesh(outVertices, outIndices);
     }
 
-    uint32_t AddVertex(const glm::vec3& pos, const glm::vec3& norm = glm::vec3(0, 1, 0), const glm::vec2& uv = glm::vec2(0));
-    uint32_t AddTriangle(uint32_t v0Idx, uint32_t v1Idx, uint32_t v2Idx);
+    khepri::VertexId AddVertex(const glm::vec3& pos, const glm::vec3& norm = glm::vec3(0, 1, 0), const glm::vec2& uv = glm::vec2(0));
+    khepri::FaceId AddTriangle(khepri::VertexId v0, khepri::VertexId v1, khepri::VertexId v2);
+    khepri::FaceId AddTriangle(uint32_t v0Idx, uint32_t v1Idx, uint32_t v2Idx) {
+        return AddTriangle(khepri::VertexId(v0Idx), khepri::VertexId(v1Idx), khepri::VertexId(v2Idx));
+    }
 
     // Topological Mesh Operators
-    bool FlipEdge(uint32_t edgeIdx);
-    uint32_t SplitEdge(uint32_t edgeIdx, const glm::vec3& newPos);
+    // NOTE [SplitEdge / Reference Invalidation Fragility]:
+    // Mutating operations (AddVertex, SplitEdge, FlipEdge) push to m_vertices, m_halfEdges,
+    // and m_faces vectors. This reallocates vector buffers and invalidates any raw C++ references
+    // or pointers held by callers. All indexing and state tracking MUST use strongly-typed IDs
+    // (VertexId, HalfEdgeId, FaceId) rather than raw pointers across mutating calls.
+    bool FlipEdge(khepri::HalfEdgeId edgeId);
+    bool FlipEdge(uint32_t edgeIdx) { return FlipEdge(khepri::HalfEdgeId(edgeIdx)); }
 
-    const std::vector<HE_Vertex>& GetVertices() const { return m_vertices; }
-    const std::vector<HE_HalfEdge>& GetHalfEdges() const { return m_halfEdges; }
-    const std::vector<HE_Face>& GetFaces() const { return m_faces; }
+    khepri::VertexId SplitEdge(khepri::HalfEdgeId edgeId, const glm::vec3& newPos);
+    uint32_t SplitEdge(uint32_t edgeIdx, const glm::vec3& newPos) {
+        return SplitEdge(khepri::HalfEdgeId(edgeIdx), newPos).Get();
+    }
 
-    uint32_t GetEulerCharacteristic() const;
+    [[nodiscard]] const std::vector<HE_Vertex>& GetVertices() const noexcept { return m_vertices; }
+    [[nodiscard]] const std::vector<HE_HalfEdge>& GetHalfEdges() const noexcept { return m_halfEdges; }
+    [[nodiscard]] const std::vector<HE_Face>& GetFaces() const noexcept { return m_faces; }
 
-    uint32_t GetFaceAcross(uint32_t edgeIdx);
-    std::vector<uint32_t> GetVertexNeighbors(uint32_t vertexIdx);
+    [[nodiscard]] size_t GetVertexCount() const noexcept { return m_vertices.size(); }
+    [[nodiscard]] size_t GetHalfEdgeCount() const noexcept { return m_halfEdges.size(); }
+    [[nodiscard]] size_t GetFaceCount() const noexcept { return m_faces.size(); }
+    [[nodiscard]] const glm::vec3& GetVertexPosition(khepri::VertexId id) const { return m_vertices[id.Get()].position; }
+
+    [[nodiscard]] uint32_t GetEulerCharacteristic() const;
+
+    [[nodiscard]] uint32_t GetFaceAcross(uint32_t edgeIdx) const;
+    [[nodiscard]] khepri::FaceId GetFaceAcross(khepri::HalfEdgeId edgeId) const;
+
+    // Fast O(deg(v)) 1-ring vertex neighbor traversal using half-edge twin/next cycles.
+    [[nodiscard]] std::vector<khepri::VertexId> GetVertexNeighborIds(khepri::VertexId vertexId) const;
+    [[nodiscard]] std::vector<uint32_t> GetVertexNeighbors(uint32_t vertexIdx) const;
 
 private:
     std::vector<HE_Vertex> m_vertices;
@@ -67,9 +107,10 @@ private:
     std::vector<HE_Face> m_faces;
 
     struct PairHash {
-        std::size_t operator()(const std::pair<uint32_t, uint32_t>& p) const {
+        std::size_t operator()(const std::pair<uint32_t, uint32_t>& p) const noexcept {
             return std::hash<uint32_t>()(p.first) ^ (std::hash<uint32_t>()(p.second) << 1);
         }
     };
     std::unordered_map<std::pair<uint32_t, uint32_t>, uint32_t, PairHash> m_edgeMap;
 };
+

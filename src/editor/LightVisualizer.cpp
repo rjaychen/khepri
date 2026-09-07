@@ -254,6 +254,123 @@ void LightVisualizer::Draw3DLoop(
     }
 }
 
+bool LightVisualizer::ProjectWorldToScreen(
+    const glm::vec3& worldPos,
+    const glm::mat4& viewProj,
+    const glm::vec2& viewportPos,
+    const glm::vec2& viewportSize,
+    glm::vec2& outScreen
+) noexcept {
+    glm::vec4 clipPos = viewProj * glm::vec4(worldPos, 1.0f);
+    if (clipPos.w <= 0.001f) {
+        return false;
+    }
+
+    glm::vec3 ndc = glm::vec3(clipPos) / clipPos.w;
+    if (std::abs(ndc.x) > 1.2f || std::abs(ndc.y) > 1.2f) {
+        return false;
+    }
+
+    outScreen.x = viewportPos.x + (ndc.x * 0.5f + 0.5f) * viewportSize.x;
+    outScreen.y = viewportPos.y + (ndc.y * 0.5f + 0.5f) * viewportSize.y;
+    return true;
+}
+
+void LightVisualizer::DrawLightIcon(
+    ImDrawList* drawList,
+    const glm::vec2& screenCenter,
+    LightType type,
+    const glm::vec3& lightColor,
+    bool isSelected,
+    bool isHovered
+) {
+    if (!drawList) return;
+
+    constexpr float badgeRadius = 16.0f;
+    const ImVec2 center(screenCenter.x, screenCenter.y);
+
+    // 1. Dark Backdrop Disc with border for high contrast
+    drawList->AddCircleFilled(center, badgeRadius, IM_COL32(22, 24, 30, 215), 24);
+    drawList->AddCircle(center, badgeRadius, IM_COL32(10, 10, 15, 230), 24, 1.5f);
+
+    // Compute brightened light color for contrast
+    int r = static_cast<int>(std::clamp(lightColor.r * 255.0f, 60.0f, 255.0f));
+    int g = static_cast<int>(std::clamp(lightColor.g * 255.0f, 60.0f, 255.0f));
+    int b = static_cast<int>(std::clamp(lightColor.b * 255.0f, 60.0f, 255.0f));
+    ImU32 glyphColor = IM_COL32(r, g, b, 255);
+
+    // 2. Selection & Hover Rings
+    if (isSelected) {
+        drawList->AddCircle(center, badgeRadius + 3.0f, IM_COL32(255, 205, 45, 255), 24, 2.0f);
+    }
+    if (isHovered) {
+        drawList->AddCircle(center, badgeRadius + (isSelected ? 5.0f : 2.5f), IM_COL32(255, 255, 255, 190), 24, 1.5f);
+    }
+
+    // 3. Draw Type-Specific Vector Glyphs
+    switch (type) {
+        case LightType::Directional: {
+            // Sun: Filled central disk + 8 radiating rays
+            constexpr float sunCoreRadius = 4.5f;
+            drawList->AddCircleFilled(center, sunCoreRadius, glyphColor, 16);
+            drawList->AddCircle(center, sunCoreRadius, IM_COL32(15, 15, 20, 200), 16, 1.0f);
+
+            constexpr float rayInner = 6.5f;
+            constexpr float rayOuter = 11.5f;
+            constexpr float step = glm::two_pi<float>() / 8.0f;
+            for (int i = 0; i < 8; ++i) {
+                float angle = static_cast<float>(i) * step;
+                float cosA = std::cos(angle);
+                float sinA = std::sin(angle);
+                ImVec2 p1(screenCenter.x + cosA * rayInner, screenCenter.y + sinA * rayInner);
+                ImVec2 p2(screenCenter.x + cosA * rayOuter, screenCenter.y + sinA * rayOuter);
+                drawList->AddLine(p1, p2, glyphColor, 1.6f);
+            }
+            break;
+        }
+
+        case LightType::Point: {
+            // Bulb: Spherical top bulb + base filament / rays
+            ImVec2 bulbCenter(screenCenter.x, screenCenter.y - 2.0f);
+            constexpr float bulbRadius = 5.5f;
+            drawList->AddCircleFilled(bulbCenter, bulbRadius, glyphColor, 16);
+            drawList->AddCircle(bulbCenter, bulbRadius, IM_COL32(15, 15, 20, 200), 16, 1.0f);
+
+            // Bulb socket / base
+            ImVec2 baseTopL(screenCenter.x - 3.0f, screenCenter.y + 4.0f);
+            ImVec2 baseTopR(screenCenter.x + 3.0f, screenCenter.y + 4.0f);
+            ImVec2 baseBotL(screenCenter.x - 2.0f, screenCenter.y + 6.5f);
+            ImVec2 baseBotR(screenCenter.x + 2.0f, screenCenter.y + 6.5f);
+            drawList->AddLine(baseTopL, baseTopR, IM_COL32(200, 200, 210, 240), 1.6f);
+            drawList->AddLine(baseBotL, baseBotR, IM_COL32(170, 170, 180, 240), 1.6f);
+
+            // Inner glowing dot
+            drawList->AddCircleFilled(bulbCenter, 2.0f, IM_COL32(255, 255, 255, 240), 8);
+            break;
+        }
+
+        case LightType::Spot: {
+            // Spotlight / Flashlight cone: Apex emitter at top, diverging beam downwards
+            ImVec2 apex(screenCenter.x, screenCenter.y - 6.0f);
+            ImVec2 leftBeam(screenCenter.x - 7.5f, screenCenter.y + 6.5f);
+            ImVec2 rightBeam(screenCenter.x + 7.5f, screenCenter.y + 6.5f);
+
+            // Subtle semi-transparent beam fill
+            drawList->AddTriangleFilled(apex, leftBeam, rightBeam, IM_COL32(r, g, b, 70));
+
+            // Cone beam outline
+            drawList->AddLine(apex, leftBeam, glyphColor, 1.6f);
+            drawList->AddLine(apex, rightBeam, glyphColor, 1.6f);
+            drawList->AddLine(leftBeam, rightBeam, glyphColor, 1.6f);
+
+            // Apex bulb dot
+            drawList->AddCircleFilled(apex, 2.5f, glyphColor, 10);
+            drawList->AddCircleFilled(apex, 1.2f, IM_COL32(255, 255, 255, 255), 8);
+            break;
+        }
+    }
+}
+
 void LightVisualizer::RenderSceneLights(
     ImDrawList* drawList,
     const Camera& camera,
@@ -261,11 +378,30 @@ void LightVisualizer::RenderSceneLights(
     const SceneNode* selectedNode,
     LightHelperDisplayMode displayMode,
     const glm::vec2& viewportPos,
-    const glm::vec2& viewportSize
+    const glm::vec2& viewportSize,
+    const glm::vec2& mousePos,
+    const SceneNode** outHoveredLightNode
 ) {
     if (!rootNode || displayMode == LightHelperDisplayMode::Hidden || !drawList) {
+        if (outHoveredLightNode) *outHoveredLightNode = nullptr;
         return;
     }
+
+    if (outHoveredLightNode) {
+        *outHoveredLightNode = nullptr;
+    }
+
+    struct LightEntry {
+        const SceneNode* node = nullptr;
+        glm::mat4 worldTransform{1.0f};
+        glm::vec2 screenPos{0.0f};
+        bool inView = false;
+    };
+
+    std::vector<LightEntry> lightEntries;
+    lightEntries.reserve(16);
+
+    glm::mat4 viewProj = camera.GetViewProjectionMatrix();
 
     std::function<void(const SceneNode*, const glm::mat4&)> traverse =
         [&](const SceneNode* node, const glm::mat4& parentTransform) {
@@ -274,21 +410,12 @@ void LightVisualizer::RenderSceneLights(
             glm::mat4 worldTransform = parentTransform * node->GetLocalTransform();
 
             if (node->lightComponent) {
-                bool isSelected = (node == selectedNode);
-                bool shouldRender = (displayMode == LightHelperDisplayMode::All) ||
-                                    (displayMode == LightHelperDisplayMode::Selected && isSelected);
-
-                if (shouldRender) {
-                    RenderSingleLightHelper(
-                        drawList,
-                        camera,
-                        node,
-                        worldTransform,
-                        viewportPos,
-                        viewportSize,
-                        isSelected
-                    );
-                }
+                LightEntry entry;
+                entry.node = node;
+                entry.worldTransform = worldTransform;
+                glm::vec3 worldPos = glm::vec3(worldTransform[3]);
+                entry.inView = ProjectWorldToScreen(worldPos, viewProj, viewportPos, viewportSize, entry.screenPos);
+                lightEntries.push_back(entry);
             }
 
             for (const auto& child : node->GetChildren()) {
@@ -297,6 +424,55 @@ void LightVisualizer::RenderSceneLights(
         };
 
     traverse(rootNode, glm::mat4(1.0f));
+
+    // Find best hovered light icon (18px hit radius)
+    const SceneNode* hoveredNode = nullptr;
+    float closestHoverDist = 18.0f;
+
+    for (const auto& entry : lightEntries) {
+        if (entry.inView) {
+            float dist = glm::distance(mousePos, entry.screenPos);
+            if (dist <= closestHoverDist) {
+                closestHoverDist = dist;
+                hoveredNode = entry.node;
+            }
+        }
+    }
+
+    if (outHoveredLightNode) {
+        *outHoveredLightNode = hoveredNode;
+    }
+
+    // Render all light helpers and icons
+    for (const auto& entry : lightEntries) {
+        bool isSelected = (entry.node == selectedNode);
+        bool isHovered = (entry.node == hoveredNode);
+        bool drawGuides = (displayMode == LightHelperDisplayMode::All) ||
+                          (displayMode == LightHelperDisplayMode::Selected && isSelected);
+
+        RenderSingleLightHelper(
+            drawList,
+            camera,
+            entry.node,
+            entry.worldTransform,
+            viewportPos,
+            viewportSize,
+            isSelected,
+            drawGuides,
+            isHovered
+        );
+    }
+
+    // Tooltip for hovered light icon
+    if (hoveredNode && hoveredNode->lightComponent) {
+        ImGui::BeginTooltip();
+        ImGui::TextColored(ImVec4(1.0f, 0.85f, 0.3f, 1.0f), "Light: %s", hoveredNode->name.c_str());
+        const char* typeStr = (hoveredNode->lightComponent->type == LightType::Directional) ? "Directional (Sun)" :
+                              (hoveredNode->lightComponent->type == LightType::Point) ? "Point Light" : "Spot Light";
+        ImGui::TextDisabled("Type: %s", typeStr);
+        ImGui::Text("Intensity: %.2f", hoveredNode->lightComponent->intensity);
+        ImGui::EndTooltip();
+    }
 }
 
 void LightVisualizer::RenderSingleLightHelper(
@@ -306,7 +482,9 @@ void LightVisualizer::RenderSingleLightHelper(
     const glm::mat4& worldTransform,
     const glm::vec2& viewportPos,
     const glm::vec2& viewportSize,
-    bool isSelected
+    bool isSelected,
+    bool drawWireframeGuides,
+    bool isHovered
 ) {
     if (!node || !node->lightComponent || !drawList) return;
 
@@ -327,100 +505,90 @@ void LightVisualizer::RenderSingleLightHelper(
 
     glm::mat4 viewProj = camera.GetViewProjectionMatrix();
 
-    // Color computation: tint with light color, brightened for readability
-    int r = static_cast<int>(std::clamp(light.color.r * 255.0f, 50.0f, 255.0f));
-    int g = static_cast<int>(std::clamp(light.color.g * 255.0f, 50.0f, 255.0f));
-    int b = static_cast<int>(std::clamp(light.color.b * 255.0f, 50.0f, 255.0f));
-    int alphaPrimary = isSelected ? 255 : 175;
-    int alphaSecondary = isSelected ? 180 : 110;
+    if (drawWireframeGuides) {
+        // Color computation: tint with light color, brightened for readability
+        int r = static_cast<int>(std::clamp(light.color.r * 255.0f, 50.0f, 255.0f));
+        int g = static_cast<int>(std::clamp(light.color.g * 255.0f, 50.0f, 255.0f));
+        int b = static_cast<int>(std::clamp(light.color.b * 255.0f, 50.0f, 255.0f));
+        int alphaPrimary = isSelected ? 255 : 175;
+        int alphaSecondary = isSelected ? 180 : 110;
 
-    ImU32 primaryColor = IM_COL32(r, g, b, alphaPrimary);
-    ImU32 secondaryColor = IM_COL32(r, g, b, alphaSecondary);
+        ImU32 primaryColor = IM_COL32(r, g, b, alphaPrimary);
+        ImU32 secondaryColor = IM_COL32(r, g, b, alphaSecondary);
 
-    float lineThickness = isSelected ? 2.0f : 1.3f;
-    float guideThickness = isSelected ? 1.4f : 1.0f;
+        float lineThickness = isSelected ? 2.0f : 1.3f;
+        float guideThickness = isSelected ? 1.4f : 1.0f;
 
-    switch (light.type) {
-        case LightType::Directional: {
-            auto dirGeom = CalculateDirectionalRaysGeometry(worldPos, worldDir, 0.85f, 2.5f, 5, 24);
+        switch (light.type) {
+            case LightType::Directional: {
+                auto dirGeom = CalculateDirectionalRaysGeometry(worldPos, worldDir, 0.85f, 2.5f, 5, 24);
 
-            // Base ring
-            Draw3DLoop(drawList, dirGeom.baseRingPoints, viewProj, viewportPos, viewportSize, secondaryColor, guideThickness);
+                // Base ring
+                Draw3DLoop(drawList, dirGeom.baseRingPoints, viewProj, viewportPos, viewportSize, secondaryColor, guideThickness);
 
-            // Central ray and arrow
-            Draw3DLine(drawList, dirGeom.centralRay.start, dirGeom.centralRay.end, viewProj, viewportPos, viewportSize, primaryColor, lineThickness + 0.5f);
-            for (const auto& arrow : dirGeom.centralArrowHead) {
-                Draw3DLine(drawList, arrow.start, arrow.end, viewProj, viewportPos, viewportSize, primaryColor, lineThickness + 0.5f);
-            }
-
-            // Parallel rays and arrows
-            for (const auto& ray : dirGeom.parallelRays) {
-                Draw3DLine(drawList, ray.start, ray.end, viewProj, viewportPos, viewportSize, primaryColor, lineThickness);
-            }
-            for (const auto& arrow : dirGeom.rayArrowHeads) {
-                Draw3DLine(drawList, arrow.start, arrow.end, viewProj, viewportPos, viewportSize, primaryColor, lineThickness);
-            }
-            break;
-        }
-
-        case LightType::Spot: {
-            auto spotGeom = CalculateSpotConeGeometry(
-                worldPos,
-                worldDir,
-                light.range,
-                light.innerCutoffAngle,
-                light.outerCutoffAngle,
-                32
-            );
-
-            // Center axis line
-            Draw3DLine(drawList, spotGeom.centerAxis.start, spotGeom.centerAxis.end, viewProj, viewportPos, viewportSize, secondaryColor, guideThickness);
-
-            // Outer cone circle (full FOV)
-            Draw3DLoop(drawList, spotGeom.outerCirclePoints, viewProj, viewportPos, viewportSize, primaryColor, lineThickness);
-
-            // Outer generating lines from apex
-            for (const auto& line : spotGeom.apexGeneratingLines) {
-                Draw3DLine(drawList, line.start, line.end, viewProj, viewportPos, viewportSize, primaryColor, lineThickness);
-            }
-
-            // Inner cone circle (hotspot)
-            if (light.innerCutoffAngle < light.outerCutoffAngle - 0.5f) {
-                Draw3DLoop(drawList, spotGeom.innerCirclePoints, viewProj, viewportPos, viewportSize, secondaryColor, guideThickness);
-                for (const auto& line : spotGeom.innerGeneratingLines) {
-                    Draw3DLine(drawList, line.start, line.end, viewProj, viewportPos, viewportSize, secondaryColor, guideThickness * 0.8f);
+                // Central ray and arrow
+                Draw3DLine(drawList, dirGeom.centralRay.start, dirGeom.centralRay.end, viewProj, viewportPos, viewportSize, primaryColor, lineThickness + 0.5f);
+                for (const auto& arrow : dirGeom.centralArrowHead) {
+                    Draw3DLine(drawList, arrow.start, arrow.end, viewProj, viewportPos, viewportSize, primaryColor, lineThickness + 0.5f);
                 }
+
+                // Parallel rays and arrows
+                for (const auto& ray : dirGeom.parallelRays) {
+                    Draw3DLine(drawList, ray.start, ray.end, viewProj, viewportPos, viewportSize, primaryColor, lineThickness);
+                }
+                for (const auto& arrow : dirGeom.rayArrowHeads) {
+                    Draw3DLine(drawList, arrow.start, arrow.end, viewProj, viewportPos, viewportSize, primaryColor, lineThickness);
+                }
+                break;
             }
-            break;
-        }
 
-        case LightType::Point: {
-            auto pointGeom = CalculatePointLightRingsGeometry(worldPos, light.range, 36);
+            case LightType::Spot: {
+                auto spotGeom = CalculateSpotConeGeometry(
+                    worldPos,
+                    worldDir,
+                    light.range,
+                    light.innerCutoffAngle,
+                    light.outerCutoffAngle,
+                    32
+                );
 
-            // 3 orthogonal attenuation range rings
-            Draw3DLoop(drawList, pointGeom.xyRingPoints, viewProj, viewportPos, viewportSize, primaryColor, lineThickness);
-            Draw3DLoop(drawList, pointGeom.xzRingPoints, viewProj, viewportPos, viewportSize, primaryColor, lineThickness);
-            Draw3DLoop(drawList, pointGeom.yzRingPoints, viewProj, viewportPos, viewportSize, primaryColor, lineThickness);
-            break;
+                // Center axis line
+                Draw3DLine(drawList, spotGeom.centerAxis.start, spotGeom.centerAxis.end, viewProj, viewportPos, viewportSize, secondaryColor, guideThickness);
+
+                // Outer cone circle (full FOV)
+                Draw3DLoop(drawList, spotGeom.outerCirclePoints, viewProj, viewportPos, viewportSize, primaryColor, lineThickness);
+
+                // Outer generating lines from apex
+                for (const auto& line : spotGeom.apexGeneratingLines) {
+                    Draw3DLine(drawList, line.start, line.end, viewProj, viewportPos, viewportSize, primaryColor, lineThickness);
+                }
+
+                // Inner cone circle (hotspot)
+                if (light.innerCutoffAngle < light.outerCutoffAngle - 0.5f) {
+                    Draw3DLoop(drawList, spotGeom.innerCirclePoints, viewProj, viewportPos, viewportSize, secondaryColor, guideThickness);
+                    for (const auto& line : spotGeom.innerGeneratingLines) {
+                        Draw3DLine(drawList, line.start, line.end, viewProj, viewportPos, viewportSize, secondaryColor, guideThickness * 0.8f);
+                    }
+                }
+                break;
+            }
+
+            case LightType::Point: {
+                auto pointGeom = CalculatePointLightRingsGeometry(worldPos, light.range, 36);
+
+                // 3 orthogonal attenuation range rings
+                Draw3DLoop(drawList, pointGeom.xyRingPoints, viewProj, viewportPos, viewportSize, primaryColor, lineThickness);
+                Draw3DLoop(drawList, pointGeom.xzRingPoints, viewProj, viewportPos, viewportSize, primaryColor, lineThickness);
+                Draw3DLoop(drawList, pointGeom.yzRingPoints, viewProj, viewportPos, viewportSize, primaryColor, lineThickness);
+                break;
+            }
         }
     }
 
-    // Small screen-space anchor glyph at light center for quick selection / spatial awareness
-    glm::vec4 centerClip = viewProj * glm::vec4(worldPos, 1.0f);
-    if (centerClip.w > 0.001f) {
-        glm::vec2 ndc(centerClip.x / centerClip.w, centerClip.y / centerClip.w);
-        if (std::abs(ndc.x) <= 1.2f && std::abs(ndc.y) <= 1.2f) {
-            glm::vec2 screenCenter = viewportPos + glm::vec2(ndc.x * 0.5f + 0.5f, ndc.y * 0.5f + 0.5f) * viewportSize;
-
-            float anchorRadius = isSelected ? 6.0f : 4.5f;
-            drawList->AddCircleFilled(ImVec2(screenCenter.x, screenCenter.y), anchorRadius, primaryColor);
-            drawList->AddCircle(ImVec2(screenCenter.x, screenCenter.y), anchorRadius, IM_COL32(20, 20, 20, 220), 12, 1.5f);
-
-            if (isSelected) {
-                // Outer highlight ring when selected
-                drawList->AddCircle(ImVec2(screenCenter.x, screenCenter.y), anchorRadius + 3.0f, IM_COL32(255, 255, 255, 200), 12, 1.2f);
-            }
-        }
+    // Draw procedural 2D billboard icon
+    glm::vec2 screenPos{0.0f};
+    if (ProjectWorldToScreen(worldPos, viewProj, viewportPos, viewportSize, screenPos)) {
+        DrawLightIcon(drawList, screenPos, light.type, light.color, isSelected, isHovered);
     }
 }
 

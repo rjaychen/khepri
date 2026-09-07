@@ -10,6 +10,7 @@
 
 // Forward declaration to avoid circular include with NodeGraphEditorPanel.h
 namespace khepri { class NodeGraphEditorPanel; }
+namespace khepri::core { class UndoStack; }
 
 class SceneTreePanel {
 public:
@@ -34,6 +35,9 @@ public:
     void SetImportModelCallback(std::function<void(const std::string&)> cb) { m_onImportModel = std::move(cb); }
     void SetOpenModelCallback(std::function<void(const std::string&)> cb) { m_onOpenModel = std::move(cb); }
 
+    void SetUndoStack(khepri::core::UndoStack* undoStack) noexcept { m_undoStack = undoStack; }
+    [[nodiscard]] khepri::core::UndoStack* GetUndoStack() const noexcept { return m_undoStack; }
+
 private:
     void RenderNodeTree(SceneNode* node);
     void RenderInspector(SceneNode* node, const std::filesystem::path& selectedAssetPath,
@@ -43,6 +47,11 @@ private:
     VulkanContext* m_context{nullptr};
     SceneNode* m_selectedNode = nullptr;
     int m_addPrimitiveType = 0; // 0: Cube, 1: Sphere, 2: Cylinder, 3: Plane
+    khepri::core::UndoStack* m_undoStack{nullptr};
+
+    glm::vec3 m_dragStartPos{0.0f};
+    glm::vec3 m_dragStartRot{0.0f};
+    glm::vec3 m_dragStartScale{1.0f};
 
     std::function<void(const std::string&)> m_onImportModel;
     std::function<void(const std::string&)> m_onOpenModel;

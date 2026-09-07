@@ -354,7 +354,11 @@ void ViewportPanel::RenderUI(Camera& camera, VkDescriptorSet& viewportTextureDS,
     if (drawList && canvasActualSize.x > 10.0f && canvasActualSize.y > 10.0f) {
         drawList->PushClipRect(canvasMin, canvasMax, true);
 
-        // 1. Light Helper Visuals (Directional rays, Spot Cone FOV, Point Light range rings)
+        ImGuiIO& io = ImGui::GetIO();
+        glm::vec2 mousePos(io.MousePos.x, io.MousePos.y);
+
+        // 1. Light Helper Visuals & Billboard Icons
+        m_hoveredLightNode = nullptr;
         khepri::LightVisualizer::RenderSceneLights(
             drawList,
             camera,
@@ -362,7 +366,9 @@ void ViewportPanel::RenderUI(Camera& camera, VkDescriptorSet& viewportTextureDS,
             selectedNode,
             m_lightHelperMode,
             glm::vec2(canvasMin.x, canvasMin.y),
-            glm::vec2(canvasActualSize.x, canvasActualSize.y)
+            glm::vec2(canvasActualSize.x, canvasActualSize.y),
+            mousePos,
+            &m_hoveredLightNode
         );
 
         // 2. Transform Gizmo (Translate / Rotate / Scale)
@@ -374,7 +380,7 @@ void ViewportPanel::RenderUI(Camera& camera, VkDescriptorSet& viewportTextureDS,
             glm::vec2(canvasActualSize.x, canvasActualSize.y)
         );
 
-        // 2. ViewCube Navigation Widget (Top-Right)
+        // 3. ViewCube Navigation Widget (Top-Right)
         m_viewCube.Render(
             drawList,
             camera,
@@ -398,10 +404,19 @@ void ViewportPanel::RenderUI(Camera& camera, VkDescriptorSet& viewportTextureDS,
         }
     }
 
+    // Light icon viewport click selection
+    if ((m_isHovered || m_isFocused) && !ImGui::IsAnyItemActive() && !m_gizmo.IsUsing() && !m_gizmo.IsHovered()) {
+        if (ImGui::IsMouseClicked(ImGuiMouseButton_Left) && m_hoveredLightNode) {
+            if (m_onSelectNode) {
+                m_onSelectNode(const_cast<SceneNode*>(m_hoveredLightNode));
+            }
+        }
+    }
+
     // Unreal Engine Camera Controls (RMB Fly/Look, RMB+LMB / MMB Pan, LMB Orbit, WASDQE Fly)
     bool lmbDown = ImGui::IsMouseDown(ImGuiMouseButton_Left);
     bool mmbDown = ImGui::IsMouseDown(ImGuiMouseButton_Middle);
-    bool gizmoInterceptingMouse = m_gizmo.IsUsing() || m_gizmo.IsHovered() || m_viewCube.IsHovered();
+    bool gizmoInterceptingMouse = m_gizmo.IsUsing() || m_gizmo.IsHovered() || m_viewCube.IsHovered() || (m_hoveredLightNode != nullptr);
     ImGuiIO& io = ImGui::GetIO();
 
     if ((m_isHovered || m_isFocused) && !ImGui::IsAnyItemActive() && !gizmoInterceptingMouse) {

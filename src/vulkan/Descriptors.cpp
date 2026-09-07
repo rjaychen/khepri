@@ -14,17 +14,28 @@ DescriptorLayoutBuilder& DescriptorLayoutBuilder::AddBinding(uint32_t binding, V
     return *this;
 }
 
+DescriptorLayoutBuilder& DescriptorLayoutBuilder::AddBindings(std::span<const VkDescriptorSetLayoutBinding> bindings) {
+    m_bindings.insert(m_bindings.end(), bindings.begin(), bindings.end());
+    return *this;
+}
+
 VkDescriptorSetLayout DescriptorLayoutBuilder::Build(VulkanContext& context) {
+    return Build(context, m_bindings);
+}
+
+VkDescriptorSetLayout DescriptorLayoutBuilder::Build(VulkanContext& context, std::span<const VkDescriptorSetLayoutBinding> bindings) {
+    if (context.GetDevice() == VK_NULL_HANDLE) {
+        return VK_NULL_HANDLE;
+    }
+
     VkDescriptorSetLayoutCreateInfo info{};
     info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-    info.bindingCount = static_cast<uint32_t>(m_bindings.size());
-    info.pBindings = m_bindings.data();
+    info.bindingCount = static_cast<uint32_t>(bindings.size());
+    info.pBindings = bindings.data();
 
-    VkDescriptorSetLayout layout;
-    if (vkCreateDescriptorSetLayout(context.GetDevice(), &info, nullptr, &layout) != VK_SUCCESS) {
-        LOG_ERROR("Failed to create descriptor set layout!");
-        throw std::runtime_error("Failed to create descriptor set layout!");
-    }
+    VkDescriptorSetLayout layout = VK_NULL_HANDLE;
+    CHECK_VK_RESULT(vkCreateDescriptorSetLayout(context.GetDevice(), &info, nullptr, &layout),
+                    "Failed to create descriptor set layout");
     return layout;
 }
 

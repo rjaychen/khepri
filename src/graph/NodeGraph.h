@@ -4,12 +4,26 @@
 #include <vector>
 #include <memory>
 #include <unordered_map>
+#include <unordered_set>
 #include <variant>
+#include <expected>
 #include <glm/glm.hpp>
 
 #include "../scene/MeshComponent.h"
 
 namespace khepri::graph {
+
+// Utility template for std::visit pattern matching across std::variant / PinValue
+template<class... Ts> struct OverloadedVisitor : Ts... { using Ts::operator()...; };
+template<class... Ts> OverloadedVisitor(Ts...) -> OverloadedVisitor<Ts...>;
+
+enum class ConnectError {
+    PinNotFound,
+    InvalidDirection,
+    TypeMismatch,
+    SameNodeSelfLoop,
+    CycleDetected
+};
 
 enum class PinType {
     GeometryBuffer,
@@ -125,9 +139,10 @@ public:
         return node;
     }
 
-    [[nodiscard]] bool Connect(uint32_t outputPinId, uint32_t inputPinId);
+    [[nodiscard]] std::expected<void, ConnectError> Connect(uint32_t outputPinId, uint32_t inputPinId);
     bool Disconnect(uint32_t inputPinId);
     bool RemoveNode(uint32_t nodeId);
+    void RestoreNode(std::shared_ptr<GraphNode> node);
 
     void Evaluate();
     void MarkNodeDirty(uint32_t nodeId);
@@ -141,12 +156,16 @@ public:
     [[nodiscard]] const std::unordered_map<uint32_t, std::shared_ptr<GraphNode>>& GetNodes() const noexcept { return m_nodes; }
     [[nodiscard]] std::shared_ptr<GraphNode> GetNode(uint32_t id) const noexcept;
 
+    [[nodiscard]] const std::unordered_map<uint32_t, std::unordered_set<uint32_t>>& GetAdjacency() const noexcept { return m_adj; }
+    void RebuildAdjacency() const;
+
     [[nodiscard]] std::vector<std::shared_ptr<GraphNode>> TopologicalSort() const;
 
 private:
     uint32_t m_nextNodeId{0};
     std::unordered_map<uint32_t, std::shared_ptr<GraphNode>> m_nodes;
     std::unordered_map<uint32_t, PinRef> m_pinMap;
+    mutable std::unordered_map<uint32_t, std::unordered_set<uint32_t>> m_adj;
 };
 
 } // namespace khepri::graph

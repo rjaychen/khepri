@@ -46,9 +46,9 @@ void EditorApp::OpenSceneModel(const std::string& path) {
         m_sceneTreePanel->ClearSelectedNode();
     }
     VkBuffer lightBuf = m_lightUBOBuffer ? m_lightUBOBuffer->GetBuffer() : VK_NULL_HANDLE;
-    auto loadedNode = ModelImporter::LoadFromFile(*m_context, path, m_textureDescriptorSetLayout, m_descriptorAllocator.get(), lightBuf);
-    if (loadedNode) {
-        m_rootNode = loadedNode;
+    auto loadedNodeResult = ModelImporter::LoadFromFile(*m_context, path, m_textureDescriptorSetLayout, m_descriptorAllocator.get(), lightBuf);
+    if (loadedNodeResult.has_value()) {
+        m_rootNode = loadedNodeResult.value();
 
         // Ensure scene root has a default sun light
         m_rootNode->AddChild(std::make_unique<DirectionalLightNode>("Sun / Main Light", glm::vec3(5.0f, 10.0f, 5.0f), glm::vec3(-45.0f, 45.0f, 0.0f)));
@@ -67,15 +67,16 @@ void EditorApp::OpenSceneModel(const std::string& path) {
         m_camera.FocusOnTarget(glm::vec3(0.0f), 4.0f);
         LOG_INFO("Opened new scene from model: " + path);
     } else {
-        LOG_ERROR("Failed to open scene model from: " + path);
+        LOG_ERROR("Failed to open scene model from: " + path + " - " + std::string(khepri::ToString(loadedNodeResult.error())));
     }
 }
 
 void EditorApp::ImportModelIntoScene(const std::string& path) {
     m_context->WaitIdle();
     VkBuffer lightBuf = m_lightUBOBuffer ? m_lightUBOBuffer->GetBuffer() : VK_NULL_HANDLE;
-    auto loadedNode = ModelImporter::LoadFromFile(*m_context, path, m_textureDescriptorSetLayout, m_descriptorAllocator.get(), lightBuf);
-    if (loadedNode) {
+    auto loadedNodeResult = ModelImporter::LoadFromFile(*m_context, path, m_textureDescriptorSetLayout, m_descriptorAllocator.get(), lightBuf);
+    if (loadedNodeResult.has_value()) {
+        auto loadedNode = loadedNodeResult.value();
         if (!m_rootNode) {
             m_rootNode = std::make_shared<SceneNode>("Scene Root");
         }
@@ -113,7 +114,7 @@ void EditorApp::ImportModelIntoScene(const std::string& path) {
         m_camera.FocusOnTarget(glm::vec3(0.0f), 4.0f);
         LOG_INFO("Imported model into current scene: " + path);
     } else {
-        LOG_ERROR("Failed to import model into scene: " + path);
+        LOG_ERROR("Failed to import model into scene: " + path + " - " + std::string(khepri::ToString(loadedNodeResult.error())));
     }
 }
 
@@ -175,9 +176,36 @@ void EditorApp::RenderMainMenuBar(ImGuiID dockspaceID) {
             ImGui::EndMenu();
         }
 
+        if (ImGui::BeginMenu("Edit")) {
+            std::string undoLabel = "Undo";
+            if (m_undoStack.CanUndo()) {
+                undoLabel += " " + std::string(m_undoStack.GetUndoCommandName());
+            }
+            if (ImGui::MenuItem(undoLabel.c_str(), "Ctrl+Z", false, m_undoStack.CanUndo())) {
+                m_undoStack.Undo();
+            }
+
+            std::string redoLabel = "Redo";
+            if (m_undoStack.CanRedo()) {
+                redoLabel += " " + std::string(m_undoStack.GetRedoCommandName());
+            }
+            if (ImGui::MenuItem(redoLabel.c_str(), "Ctrl+Y", false, m_undoStack.CanRedo())) {
+                m_undoStack.Redo();
+            }
+
+            ImGui::Separator();
+            if (ImGui::MenuItem("Clear Undo History", nullptr, false, m_undoStack.GetUndoCount() > 0 || m_undoStack.GetRedoCount() > 0)) {
+                m_undoStack.Clear();
+            }
+            ImGui::EndMenu();
+        }
+
         if (ImGui::BeginMenu("View")) {
             if (ImGui::MenuItem("Reset Camera View (F)")) {
                 m_camera.FocusOnTarget(glm::vec3(0.0f));
+            }
+            if (ImGui::MenuItem("Toggle Fullscreen", "F11", m_window.IsFullscreen())) {
+                m_window.ToggleFullscreen();
             }
             if (ImGui::MenuItem("Reset Layout")) {
                 m_rebuildLayout = true;
@@ -361,13 +389,16 @@ EditorApp::EditorApp()
 
     // Init Viewport & Editor Panels
     m_viewportPanel = std::make_unique<ViewportPanel>(*m_context);
+    m_viewportPanel->GetGizmo().SetUndoStack(&m_undoStack);
     m_sceneTreePanel = std::make_unique<SceneTreePanel>(*m_context);
+    m_sceneTreePanel->SetUndoStack(&m_undoStack);
     m_timelinePanel = std::make_unique<TimelinePanel>();
     m_vulkanInspectorPanel = std::make_unique<VulkanInspectorPanel>(*m_context);
 
     // Initialize AssetManager & Node Graph Engine
     khepri::AssetManager::Instance().Initialize(*m_context);
     m_nodeGraphEditorPanel = std::make_unique<khepri::NodeGraphEditorPanel>(*m_context);
+    m_nodeGraphEditorPanel->SetUndoStack(&m_undoStack);
     m_assetManagerPanel = std::make_unique<khepri::AssetManagerPanel>();
 
     // Connect Asset & Viewport callbacks
@@ -380,11 +411,36 @@ EditorApp::EditorApp()
     m_viewportPanel->SetImportModelCallback([this](const std::string& path) {
         ImportModelIntoScene(path);
     });
+    m_viewportPanel->SetSelectNodeCallback([this](SceneNode* node) {
+        if (m_sceneTreePanel) {
+            m_sceneTreePanel->SetSelectedNode(node);
+        }
+    });
     m_sceneTreePanel->SetImportModelCallback([this](const std::string& path) {
         ImportModelIntoScene(path);
     });
     m_sceneTreePanel->SetOpenModelCallback([this](const std::string& path) {
         OpenSceneModel(path);
+    });
+
+    // Centralized Undo/Redo state observer
+    m_undoStack.SetChangeListener([this]() {
+        if (m_sceneTreePanel) {
+            m_sceneTreePanel->ValidateSelection(m_rootNode.get());
+        }
+        if (m_nodeGraphEditorPanel) {
+            m_nodeGraphEditorPanel->ValidateTargetSceneNode(m_rootNode.get());
+            SceneNode* sel = m_sceneTreePanel ? m_sceneTreePanel->GetSelectedNode() : nullptr;
+            if (m_nodeGraphEditorPanel->GetTargetSceneNode() != sel) {
+                m_nodeGraphEditorPanel->SetTargetSceneNode(sel);
+            }
+            if (sel && sel->nodeGraph) {
+                sel->nodeGraph->Evaluate();
+                if (auto outMesh = m_nodeGraphEditorPanel->GetActiveOutputMesh()) {
+                    if (!sel->lightComponent) sel->mesh = outMesh;
+                }
+            }
+        }
     });
 
     // Register Viewport Texture for ImGui rendering (initial DS creation)
@@ -626,12 +682,6 @@ void EditorApp::CreateRenderPipeline() {
 
 void EditorApp::BuildSampleScene() {
     m_rootNode = std::make_unique<SceneNode>("Scene Root");
-    m_lightGizmoMesh = MeshComponent::CreateSphere(*m_context, 0.45f, 32, 16);
-    if (m_lightGizmoMesh) {
-        LOG_INFO("Created light gizmo sphere mesh: " + std::to_string(m_lightGizmoMesh->GetVertices().size()) + " vertices, " + std::to_string(m_lightGizmoMesh->GetIndexCount()) + " indices");
-    } else {
-        LOG_ERROR("Failed to create light gizmo sphere mesh!");
-    }
 
     // Add default Sun / Directional light node (Unreal ALight/ADirectionalLight style)
     m_rootNode->AddChild(std::make_unique<DirectionalLightNode>("Sun / Main Light", glm::vec3(2.0f, 2.0f, 2.0f), glm::vec3(-45.0f, 45.0f, 0.0f)));
@@ -688,28 +738,8 @@ void EditorApp::DrawSceneNode(VkCommandBuffer cmd, SceneNode* node, const glm::m
 
     // Draw the node's mesh (if it has one), or light gizmo stub if it's a light node
     std::shared_ptr<MeshComponent> targetMesh = node->mesh;
-    bool isLightGizmo = node->IsLightNode() || (node->lightComponent != nullptr);
-    if (!targetMesh && isLightGizmo && m_lightGizmoMesh) {
-        targetMesh = m_lightGizmoMesh;
-        static bool s_loggedGizmoDraw = false;
-        if (!s_loggedGizmoDraw) {
-            LOG_INFO("Drawing light gizmo for node: " + node->name + " with mesh vertices: " + std::to_string(targetMesh->GetVertices().size()));
-            s_loggedGizmoDraw = true;
-        }
-    }
 
     glm::mat4 renderTransform = worldTransform;
-    if (isLightGizmo) {
-        // Strip scale from world transform so light gizmo maintains fixed compact size regardless of node scaling
-        glm::vec3 worldPos = glm::vec3(worldTransform[3]);
-        glm::mat3 rotMat(worldTransform);
-        if (glm::length(rotMat[0]) > 1e-5f) rotMat[0] = glm::normalize(rotMat[0]);
-        if (glm::length(rotMat[1]) > 1e-5f) rotMat[1] = glm::normalize(rotMat[1]);
-        if (glm::length(rotMat[2]) > 1e-5f) rotMat[2] = glm::normalize(rotMat[2]);
-
-        renderTransform = glm::mat4(rotMat);
-        renderTransform[3] = glm::vec4(worldPos, 1.0f);
-    }
 
     if (targetMesh) {
         VkDescriptorSet textureDS = targetMesh->HasTexture() ?
@@ -722,12 +752,12 @@ void EditorApp::DrawSceneNode(VkCommandBuffer cmd, SceneNode* node, const glm::m
         PushConstants push{};
         push.model = renderTransform;
         push.mvp   = m_camera.GetViewProjectionMatrix() * renderTransform;
-        push.baseColorFactor = isLightGizmo ? glm::vec4(node->lightComponent->color, 1.0f) : targetMesh->GetBaseColorFactor();
-        push.emissiveFactor  = isLightGizmo ? glm::vec4(node->lightComponent->color, std::max(2.5f, node->lightComponent->intensity * 2.0f)) : glm::vec4(0.0f, 0.0f, 0.0f, 1.0f);
-        push.useTexture = (targetMesh->HasTexture() && !isLightGizmo) ? 1 : 0;
+        push.baseColorFactor = targetMesh->GetBaseColorFactor();
+        push.emissiveFactor  = glm::vec4(0.0f, 0.0f, 0.0f, 1.0f);
+        push.useTexture = targetMesh->HasTexture() ? 1 : 0;
         push.shininess = 32.0f;
-        push.specularStrength = isLightGizmo ? 0.0f : 0.5f;
-        push.ambientStrength = isLightGizmo ? 1.0f : 0.15f;
+        push.specularStrength = 0.5f;
+        push.ambientStrength = 0.15f;
 
         // 1. Shaded Solid Pass (if Off or Overlay)
         if (node->wireframeMode != WireframeMode::WireframeOnly) {
@@ -906,6 +936,14 @@ void EditorApp::Run() {
     while (!m_window.ShouldClose()) {
         m_window.PollEvents();
 
+        // Check for minimization (0x0 framebuffer)
+        int fbWidth = 0, fbHeight = 0;
+        m_window.GetFramebufferSize(&fbWidth, &fbHeight);
+        if (fbWidth == 0 || fbHeight == 0) {
+            m_window.WaitEventsTimeout(0.05);
+            continue;
+        }
+
         auto currentTime = std::chrono::high_resolution_clock::now();
         float deltaTime = std::chrono::duration<float, std::chrono::seconds::period>(currentTime - lastTime).count();
         lastTime = currentTime;
@@ -916,8 +954,12 @@ void EditorApp::Run() {
         // Acquire Swapchain Image
         uint32_t imageIndex;
         VkResult acquireResult = m_swapchain->AcquireNextImage(&imageIndex);
-        if (acquireResult == VK_ERROR_OUT_OF_DATE_KHR) {
-            m_swapchain->Recreate(m_window.GetWidth(), m_window.GetHeight());
+        if (acquireResult == VK_ERROR_OUT_OF_DATE_KHR || acquireResult == VK_SUBOPTIMAL_KHR) {
+            int curW = 0, curH = 0;
+            m_window.GetFramebufferSize(&curW, &curH);
+            if (curW > 0 && curH > 0) {
+                m_swapchain->Recreate(curW, curH);
+            }
             continue;
         }
 
@@ -952,8 +994,9 @@ void EditorApp::Run() {
             m_vulkanInspectorPanel->RenderUI(*m_swapchain);
         }
         if (m_showNodeGraph && m_nodeGraphEditorPanel) {
+            m_nodeGraphEditorPanel->ValidateTargetSceneNode(m_rootNode.get());
             SceneNode* selected = m_sceneTreePanel ? m_sceneTreePanel->GetSelectedNode() : nullptr;
-            if (selected && m_nodeGraphEditorPanel->GetTargetSceneNode() != selected) {
+            if (m_nodeGraphEditorPanel->GetTargetSceneNode() != selected) {
                 m_nodeGraphEditorPanel->SetTargetSceneNode(selected);
             }
 
@@ -969,6 +1012,24 @@ void EditorApp::Run() {
         }
         if (m_showLogConsole) {
             RenderEngineLogConsole(&m_showLogConsole);
+        }
+
+        // Global Keyboard Shortcuts (Undo: Ctrl+Z, Redo: Ctrl+Y / Ctrl+Shift+Z, Fullscreen: F11 / Alt+Enter)
+        ImGuiIO& io = ImGui::GetIO();
+        if (!io.WantTextInput) {
+            if (ImGui::IsKeyPressed(ImGuiKey_F11, false) ||
+                (io.KeyAlt && ImGui::IsKeyPressed(ImGuiKey_Enter, false))) {
+                m_window.ToggleFullscreen();
+            } else if (io.KeyCtrl && !io.KeyShift && ImGui::IsKeyPressed(ImGuiKey_Z, false)) {
+                if (m_undoStack.CanUndo()) {
+                    m_undoStack.Undo();
+                }
+            } else if ((io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_Y, false)) ||
+                       (io.KeyCtrl && io.KeyShift && ImGui::IsKeyPressed(ImGuiKey_Z, false))) {
+                if (m_undoStack.CanRedo()) {
+                    m_undoStack.Redo();
+                }
+            }
         }
 
         ImGui::Render();
@@ -996,7 +1057,11 @@ void EditorApp::Run() {
         if (presentResult == VK_ERROR_OUT_OF_DATE_KHR || presentResult == VK_SUBOPTIMAL_KHR
             || m_window.WasResized()) {
             m_window.ResetResizedFlag();
-            m_swapchain->Recreate(m_window.GetWidth(), m_window.GetHeight());
+            int curW = 0, curH = 0;
+            m_window.GetFramebufferSize(&curW, &curH);
+            if (curW > 0 && curH > 0) {
+                m_swapchain->Recreate(curW, curH);
+            }
         }
 
         currentFrame = (currentFrame + 1) % Swapchain::MAX_FRAMES_IN_FLIGHT;

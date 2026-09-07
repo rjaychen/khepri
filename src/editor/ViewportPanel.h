@@ -65,6 +65,8 @@ public:
 
     void SetNativeWindow(GLFWwindow* window) { m_window = window; }
     void SetImportModelCallback(std::function<void(const std::string&)> cb) { m_onImportModel = std::move(cb); }
+    void SetSelectNodeCallback(std::function<void(SceneNode*)> cb) { m_onSelectNode = std::move(cb); }
+    [[nodiscard]] bool IsLightIconHovered() const noexcept { return m_hoveredLightNode != nullptr; }
 
 private:
     VulkanContext& m_context;
@@ -72,6 +74,8 @@ private:
     khepri::TransformGizmo m_gizmo;
     khepri::ViewCube m_viewCube;
     khepri::LightHelperDisplayMode m_lightHelperMode = khepri::LightHelperDisplayMode::Selected;
+    const SceneNode* m_hoveredLightNode = nullptr;
+    std::function<void(SceneNode*)> m_onSelectNode;
     uint32_t m_width = 800;
     uint32_t m_height = 600;
     ResolutionMode m_resMode = ResolutionMode::FitPanel;

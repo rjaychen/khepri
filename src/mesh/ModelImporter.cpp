@@ -3,24 +3,72 @@
 #include "OBJImporter.h"
 #include "STLImporter.h"
 #include "../core/Logger.h"
+#include <filesystem>
 #include <algorithm>
 
-std::shared_ptr<SceneNode> ModelImporter::LoadFromFile(VulkanContext& context, const std::string& filepath,
-                                                       VkDescriptorSetLayout setLayout, DescriptorAllocator* allocator, VkBuffer lightUBOBuffer) {
-    static GLTFImporter gltfImporter;
-    static OBJImporter objImporter;
-    static STLImporter stlImporter;
+namespace {
+std::vector<ModelImporter::ImporterRegistryEntry>& GetInternalRegistry() {
+    static std::vector<ModelImporter::ImporterRegistryEntry> registry = {
+        { {".gltf", ".glb"}, []() -> std::unique_ptr<ModelImporter> { return std::make_unique<GLTFImporter>(); } },
+        { {".obj"},          []() -> std::unique_ptr<ModelImporter> { return std::make_unique<OBJImporter>(); } },
+        { {".stl"},          []() -> std::unique_ptr<ModelImporter> { return std::make_unique<STLImporter>(); } }
+    };
+    return registry;
+}
+} // namespace
 
-    static std::vector<ModelImporter*> importers = { &gltfImporter, &objImporter, &stlImporter };
+void ModelImporter::RegisterImporter(std::vector<std::string> extensions, std::function<std::unique_ptr<ModelImporter>()> factory) {
+    GetInternalRegistry().push_back({ std::move(extensions), std::move(factory) });
+}
 
-    for (auto* importer : importers) {
-        if (importer->CanImport(filepath)) {
-            return importer->Import(context, filepath, setLayout, allocator, lightUBOBuffer);
+const std::vector<ModelImporter::ImporterRegistryEntry>& ModelImporter::GetRegistry() {
+    return GetInternalRegistry();
+}
+
+std::expected<std::shared_ptr<SceneNode>, khepri::ImportError> ModelImporter::LoadFromFile(
+    VulkanContext& context, const std::string& filepath,
+    VkDescriptorSetLayout setLayout, DescriptorAllocator* allocator, VkBuffer lightUBOBuffer) {
+
+    // Resolve path check (handling relative search fallbacks)
+    std::string resolvedPath = filepath;
+    if (!std::filesystem::exists(resolvedPath)) {
+        std::vector<std::string> candidates = {
+            filepath,
+            "../" + filepath,
+            "../../" + filepath,
+            "../../../" + filepath
+        };
+        for (const auto& candidate : candidates) {
+            if (std::filesystem::exists(candidate)) {
+                resolvedPath = candidate;
+                break;
+            }
+        }
+    }
+
+    if (!std::filesystem::exists(resolvedPath)) {
+        LOG_WARN("File not found for model import: " + filepath);
+        return std::unexpected(khepri::ImportError::FileNotFound);
+    }
+
+    std::string ext = std::filesystem::path(resolvedPath).extension().string();
+    std::transform(ext.begin(), ext.end(), ext.begin(), [](unsigned char c) { return static_cast<char>(tolower(c)); });
+
+    for (const auto& entry : GetInternalRegistry()) {
+        for (const auto& supportedExt : entry.extensions) {
+            std::string sExt = supportedExt;
+            std::transform(sExt.begin(), sExt.end(), sExt.begin(), [](unsigned char c) { return static_cast<char>(tolower(c)); });
+            if (sExt == ext) {
+                auto importer = entry.factory();
+                if (importer && importer->CanImport(resolvedPath)) {
+                    return importer->Import(context, resolvedPath, setLayout, allocator, lightUBOBuffer);
+                }
+            }
         }
     }
 
     LOG_ERROR("Unsupported 3D model format or unrecognized file extension for: " + filepath);
-    return nullptr;
+    return std::unexpected(khepri::ImportError::UnsupportedFormat);
 }
 
 std::shared_ptr<MeshComponent> ModelImporter::CreateSampleMesh(VulkanContext& context, const std::string& primitiveName) {
@@ -33,3 +81,4 @@ std::shared_ptr<MeshComponent> ModelImporter::CreateSampleMesh(VulkanContext& co
     }
     return MeshComponent::CreateCube(context, 2.0f);
 }
+
