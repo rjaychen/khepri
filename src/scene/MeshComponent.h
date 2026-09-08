@@ -84,6 +84,9 @@ public:
 
     glm::vec3 GetBoundingBoxCenter() const;
     float GetBoundingBoxRadius() const;
+    void GetBoundingBox(glm::vec3& outMin, glm::vec3& outMax) const noexcept;
+    const glm::vec3& GetBoundingBoxMin() const noexcept { return m_boundingBoxMin; }
+    const glm::vec3& GetBoundingBoxMax() const noexcept { return m_boundingBoxMax; }
 
     void Draw(VkCommandBuffer cmd) const;
 
@@ -121,4 +124,8 @@ private:
 
     std::unique_ptr<Buffer> m_vertexBuffer;
     std::unique_ptr<Buffer> m_indexBuffer;
+
+    glm::vec3 m_boundingBoxMin{0.0f};
+    glm::vec3 m_boundingBoxMax{0.0f};
+    void CalculateBoundingBox();
 };

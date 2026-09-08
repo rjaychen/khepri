@@ -20,7 +20,7 @@ SceneTreePanel::SceneTreePanel(VulkanContext* context)
     : m_context(context) {}
 
 SceneTreePanel::SceneTreePanel(VulkanContext& context)
-    : m_context(&context) {}
+    : SceneTreePanel(&context) {}
 
 void SceneTreePanel::SetSelectedNode(SceneNode* node) {
     m_selectedNode = node;
@@ -59,11 +59,13 @@ void SceneTreePanel::SelectAll(SceneNode* rootNode) {
     if (!rootNode) return;
     m_selectedNodes.clear();
     std::vector<SceneNode*> flattened;
-    CollectFlattenedNodes(rootNode, flattened);
+    for (const auto& child : rootNode->GetChildren()) {
+        CollectFlattenedNodes(child.get(), flattened);
+    }
     for (auto* n : flattened) {
         m_selectedNodes.insert(n);
     }
-    m_selectedNode = rootNode;
+    m_selectedNode = flattened.empty() ? nullptr : flattened.front();
 }
 
 void SceneTreePanel::ClearAllSelections() {
@@ -313,22 +315,39 @@ void SceneTreePanel::RenderNodeContextMenu(SceneNode* node, SceneNode* rootNode)
         }
 
         if (node != rootNode && ImGui::MenuItem("Delete Selected", "Del")) {
+            std::vector<SceneNode*> toDelete;
+            for (auto* sel : m_selectedNodes) {
+                if (sel && sel->GetParent() && sel != rootNode) {
+                    toDelete.push_back(sel);
+                }
+            }
+            // Filter out nodes whose ancestor is also being deleted
+            toDelete.erase(std::remove_if(toDelete.begin(), toDelete.end(), [&](SceneNode* candidate) {
+                for (auto* other : toDelete) {
+                    if (other != candidate && candidate->IsDescendantOf(other)) {
+                        return true;
+                    }
+                }
+                return false;
+            }), toDelete.end());
+
+            ClearAllSelections();
+
             if (m_undoStack) {
                 m_undoStack->BeginTransaction("Delete Selected Scene Nodes");
-                for (auto* sel : m_selectedNodes) {
-                    if (sel && sel->GetParent() && sel != rootNode) {
+                for (auto* sel : toDelete) {
+                    if (sel && sel->GetParent()) {
                         m_undoStack->PushAndExecute(std::make_unique<khepri::scene::RemoveChildNodeCommand>(sel->GetParent(), sel));
                     }
                 }
                 m_undoStack->EndTransaction();
             } else {
-                for (auto* sel : m_selectedNodes) {
-                    if (sel && sel->GetParent() && sel != rootNode) {
+                for (auto* sel : toDelete) {
+                    if (sel && sel->GetParent()) {
                         sel->GetParent()->RemoveChild(sel);
                     }
                 }
             }
-            ClearAllSelections();
         }
 
         ImGui::Separator();
@@ -358,12 +377,13 @@ void SceneTreePanel::RenderNodeTree(SceneNode* node, SceneNode* rootNode, int de
 
     ImGui::PushID(static_cast<int>(node->id));
 
+    float scale = Theme::GetTotalScale();
     ImVec2 nodeScreenPos = ImGui::GetCursorScreenPos();
     ImDrawList* drawList = ImGui::GetWindowDrawList();
 
     // Draw hierarchy connector lines for child levels
     if (depth > 0) {
-        ImVec2 branchTarget = ImVec2(nodeScreenPos.x - 6.0f, nodeScreenPos.y + 10.0f);
+        ImVec2 branchTarget = ImVec2(nodeScreenPos.x - 6.0f * scale, nodeScreenPos.y + 10.0f * scale);
         UIWidgets::DrawTreeConnectorLine(drawList, parentPos, branchTarget, isLastChild);
     }
 
@@ -404,7 +424,7 @@ void SceneTreePanel::RenderNodeTree(SceneNode* node, SceneNode* rootNode, int de
     VectorIconType eyeIconType = node->visible ? VectorIconType::Eye : VectorIconType::EyeSlash;
     if (VectorIcons::IconButton("##visBtn", eyeIconType, node->visible,
                                node->visible ? "Visible — click to hide" : "Hidden — click to show",
-                               ImVec2(20.0f, 20.0f))) {
+                               ImVec2(20.0f * scale, 20.0f * scale))) {
         bool newVis = !node->visible;
         if (m_undoStack) {
             m_undoStack->PushAndExecute(std::make_unique<khepri::scene::SetNodeVisibilityCommand>(node, newVis));
@@ -413,17 +433,17 @@ void SceneTreePanel::RenderNodeTree(SceneNode* node, SceneNode* rootNode, int de
         }
     }
 
-    ImGui::SameLine(0, 4.0f);
+    ImGui::SameLine(0, 4.0f * scale);
 
     // --- Inline Action: Vector Lock Icon (Transform Scale Lock) ---
     if (node->lockScale || ImGui::IsItemHovered()) {
         VectorIconType lockIconType = node->lockScale ? VectorIconType::Lock : VectorIconType::Unlock;
         if (VectorIcons::IconButton("##lockBtn", lockIconType, node->lockScale,
                                    node->lockScale ? "Scale locked" : "Scale unlocked",
-                                   ImVec2(20.0f, 20.0f))) {
+                                   ImVec2(20.0f * scale, 20.0f * scale))) {
             node->lockScale = !node->lockScale;
         }
-        ImGui::SameLine(0, 4.0f);
+        ImGui::SameLine(0, 4.0f * scale);
     }
 
     // --- Tree Node Render ---
@@ -448,9 +468,9 @@ void SceneTreePanel::RenderNodeTree(SceneNode* node, SceneNode* rootNode, int de
 
     if (isNodeRenaming) {
         // Inline renaming mode
-        VectorIcons::RenderInline(iconType, 16.0f, iconColor);
+        VectorIcons::RenderInline(iconType, 16.0f * scale, iconColor);
         ImGui::SameLine();
-        ImGui::SetNextItemWidth(140.0f);
+        ImGui::SetNextItemWidth(140.0f * scale);
         if (m_focusRenameInput) {
             ImGui::SetKeyboardFocusHere();
             m_focusRenameInput = false;
@@ -482,8 +502,8 @@ void SceneTreePanel::RenderNodeTree(SceneNode* node, SceneNode* rootNode, int de
         opened = ImGui::TreeNodeEx("##TreeNode", flags, "    %s", node->name.c_str());
 
         // Draw crisp vector icon over tree row indentation
-        ImVec2 iconCenter(treeCursor.x + (node->GetChildren().empty() ? 10.0f : 30.0f), treeCursor.y + 10.0f);
-        VectorIcons::Draw(drawList, iconType, iconCenter, 14.0f, ImGui::GetColorU32(iconColor));
+        ImVec2 iconCenter(treeCursor.x + (node->GetChildren().empty() ? 10.0f : 30.0f) * scale, treeCursor.y + 10.0f * scale);
+        VectorIcons::Draw(drawList, iconType, iconCenter, 14.0f * scale, ImGui::GetColorU32(iconColor));
 
         if (ImGui::IsItemClicked(ImGuiMouseButton_Left) && !ImGui::IsItemToggledOpen()) {
             HandleMultiSelectClick(node, rootNode);
@@ -504,15 +524,17 @@ void SceneTreePanel::RenderNodeTree(SceneNode* node, SceneNode* rootNode, int de
 
     // --- Drag and Drop Source ---
     if (node->GetParent() != nullptr && ImGui::BeginDragDropSource(ImGuiDragDropFlags_SourceAllowNullID)) {
-        ImGui::SetDragDropPayload("SCENE_NODE_PTR", &node, sizeof(SceneNode*));
+        uint32_t nodeId = node->id;
+        ImGui::SetDragDropPayload("SCENE_NODE_ID", &nodeId, sizeof(uint32_t));
         ImGui::Text("Moving %s", node->name.c_str());
         ImGui::EndDragDropSource();
     }
 
     // --- Drag and Drop Target ---
     if (ImGui::BeginDragDropTarget()) {
-        if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("SCENE_NODE_PTR")) {
-            SceneNode* draggedNode = *(SceneNode**)payload->Data;
+        if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("SCENE_NODE_ID")) {
+            uint32_t draggedId = *static_cast<const uint32_t*>(payload->Data);
+            SceneNode* draggedNode = rootNode ? rootNode->FindDescendantById(draggedId) : nullptr;
             if (draggedNode && draggedNode != node && draggedNode->GetParent() != node && !node->IsDescendantOf(draggedNode)) {
                 if (m_undoStack) {
                     m_undoStack->PushAndExecute(std::make_unique<khepri::scene::ReparentNodeCommand>(draggedNode, node));
@@ -540,7 +562,7 @@ void SceneTreePanel::RenderNodeTree(SceneNode* node, SceneNode* rootNode, int de
 
     // Recurse children
     if (opened) {
-        ImVec2 currentChildAnchor = ImVec2(nodeScreenPos.x + 12.0f, nodeScreenPos.y + 14.0f);
+        ImVec2 currentChildAnchor = ImVec2(nodeScreenPos.x + 12.0f * scale, nodeScreenPos.y + 14.0f * scale);
         const auto& children = node->GetChildren();
         for (size_t i = 0; i < children.size(); ++i) {
             bool isLast = (i == children.size() - 1);
@@ -704,7 +726,9 @@ void SceneTreePanel::RenderInspector(SceneNode* node, const std::filesystem::pat
     if (isLightNode) {
         ImGui::BeginDisabled();
     }
-    ImGui::Checkbox("🔒 Lock Scale Aspect Ratio", &node->lockScale);
+    VectorIcons::RenderInline(VectorIconType::Lock, 14.0f * Theme::GetTotalScale(), Theme::COLOR_TEXT_PRIMARY);
+    ImGui::SameLine();
+    ImGui::Checkbox("Lock Scale Aspect Ratio", &node->lockScale);
     glm::vec3 oldScale = node->scale;
     glm::vec3 newScale = oldScale;
     if (ImGui::DragFloat3("Scale", glm::value_ptr(newScale), 0.01f, 0.001f, 100.0f)) {
@@ -826,8 +850,9 @@ void SceneTreePanel::RenderUI(SceneNode* rootNode, std::shared_ptr<MeshComponent
 
     // Drop target on empty space
     if (rootNode && ImGui::BeginDragDropTarget()) {
-        if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("SCENE_NODE_PTR")) {
-            SceneNode* draggedNode = *(SceneNode**)payload->Data;
+        if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("SCENE_NODE_ID")) {
+            uint32_t draggedId = *static_cast<const uint32_t*>(payload->Data);
+            SceneNode* draggedNode = rootNode->FindDescendantById(draggedId);
             if (draggedNode && draggedNode->GetParent() != rootNode && draggedNode != rootNode) {
                 if (m_undoStack) {
                     m_undoStack->PushAndExecute(std::make_unique<khepri::scene::ReparentNodeCommand>(draggedNode, rootNode));

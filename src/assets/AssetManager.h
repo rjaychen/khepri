@@ -6,6 +6,7 @@
 #include <unordered_map>
 #include <memory>
 #include <string>
+#include <filesystem>
 
 namespace khepri {
 
@@ -17,6 +18,8 @@ public:
 
     std::shared_ptr<Material> CreateMaterial(const std::string& name);
     std::shared_ptr<Material> GetMaterial(const std::string& name);
+    std::shared_ptr<Material> LoadMaterial(const std::filesystem::path& path);
+    bool SaveMaterial(const Material& material, const std::filesystem::path& path);
 
     std::shared_ptr<Material> GetDefaultMaterial() const { return m_defaultMaterial; }
     std::shared_ptr<Material> GetDefaultEmissiveLightMaterial() const { return m_defaultEmissiveLightMaterial; }

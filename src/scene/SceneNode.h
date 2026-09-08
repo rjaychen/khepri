@@ -28,7 +28,7 @@ public:
     [[nodiscard]] virtual bool IsLightNode() const noexcept { return false; }
 
     std::string name;
-    uint32_t id;
+    uint32_t id = 0;
     static uint32_t s_nextId;
     std::shared_ptr<MeshComponent> mesh;
     std::shared_ptr<LightComponent> lightComponent;
@@ -61,6 +61,8 @@ public:
     std::unique_ptr<SceneNode> DetachChild(SceneNode* child);
     bool IsDescendantOf(const SceneNode* possibleAncestor) const;
     bool Contains(const SceneNode* target) const noexcept;
+    SceneNode* FindDescendantById(uint32_t searchId) noexcept;
+    const SceneNode* FindDescendantById(uint32_t searchId) const noexcept;
 
     // Reflected Properties implementation
     std::vector<Property>& GetProperties() override { return m_properties; }

@@ -212,9 +212,7 @@ void EditorApp::RenderMainMenuBar(ImGuiID dockspaceID) {
             }
             if (ImGui::BeginMenu("UI Scale / Zoom")) {
                 auto applyScale = [this](float s) {
-                    m_uiScale = s;
-                    khepri::ui::Theme::SetUserScale(m_uiScale);
-                    khepri::ui::Theme::ApplyTheme(khepri::ui::Theme::GetTotalScale());
+                    m_pendingFontScale = s;
                 };
                 if (ImGui::MenuItem("100% (Normal)", nullptr, m_uiScale == 1.0f))  applyScale(1.0f);
                 if (ImGui::MenuItem("125% (Medium)", nullptr, m_uiScale == 1.25f)) applyScale(1.25f);
@@ -711,9 +709,9 @@ void EditorApp::BuildSampleScene() {
     // Add default Sun / Directional light node (Unreal ALight/ADirectionalLight style)
     m_rootNode->AddChild(std::make_unique<DirectionalLightNode>("Sun / Main Light", glm::vec3(2.0f, 2.0f, 2.0f), glm::vec3(-45.0f, 45.0f, 0.0f)));
 
-    // Default object in scene is now a Cylinder so it's not a cube!
-    auto demoNode = std::make_unique<SceneNode>("Demo Cylinder");
-    demoNode->mesh = MeshComponent::CreateCylinder(*m_context, 0.5f, 1.2f, 32);
+    // Initialize Default object in scene
+    auto demoNode = std::make_unique<SceneNode>("Demo Cube");
+    demoNode->mesh = MeshComponent::CreateCube(*m_context, 1.0f);
     SceneNode* demoPtr = m_rootNode->AddChild(std::move(demoNode));
 
     if (m_nodeGraphEditorPanel) {
@@ -986,6 +984,17 @@ void EditorApp::Run() {
                 m_swapchain->Recreate(curW, curH);
             }
             continue;
+        }
+
+        // Handle deferred typography / UI scale changes at safe point between frames
+        if (m_pendingFontScale > 0.0f) {
+            m_context->WaitIdle();
+            m_uiScale = m_pendingFontScale;
+            khepri::ui::Theme::SetUserScale(m_uiScale);
+            ImGuiIO& io = ImGui::GetIO();
+            khepri::ui::Theme::LoadFonts(io, khepri::ui::Theme::GetTotalScale(), "assets/fonts");
+            khepri::ui::Theme::ApplyTheme(khepri::ui::Theme::GetTotalScale());
+            m_pendingFontScale = 0.0f;
         }
 
         // Start ImGui Frame

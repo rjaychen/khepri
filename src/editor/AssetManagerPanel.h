@@ -45,15 +45,36 @@ public:
     ui::AssetCategory GetCategoryFilter() const { return m_categoryFilter; }
     void SetCategoryFilter(ui::AssetCategory category) { m_categoryFilter = category; }
 
+public:
+    struct CachedAssetEntry {
+        std::filesystem::path path;
+        std::string filename;
+        bool isDirectory = false;
+        uintmax_t fileSize = 0;
+        std::string formattedSize;
+        std::string formattedTime;
+        ui::AssetCategory category = ui::AssetCategory::Unknown;
+        std::time_t lastWriteTime = 0;
+    };
+
+    void InvalidateCache() { m_cacheDirty = true; }
+
 private:
     void RenderNavigationBar();
     void RenderCategoryFilterBar();
     void RenderFolderTree(const std::filesystem::path& dirPath);
-    void RenderFileGrid(const std::vector<std::filesystem::directory_entry>& entries);
-    void RenderFileList(const std::vector<std::filesystem::directory_entry>& entries);
+    void RenderFileGrid(const std::vector<CachedAssetEntry>& entries);
+    void RenderFileList(const std::vector<CachedAssetEntry>& entries);
     void RenderContextMenu();
 
-    std::vector<std::filesystem::directory_entry> GetFilteredDirectoryEntries();
+    void RefreshCache();
+    void UpdateFilteredEntries();
+    const std::vector<CachedAssetEntry>& GetFilteredEntries();
+
+    std::vector<CachedAssetEntry> m_cachedEntries;
+    std::vector<CachedAssetEntry> m_filteredEntries;
+    bool m_cacheDirty = true;
+    std::chrono::steady_clock::time_point m_lastCacheRefresh;
 
     std::filesystem::path m_rootDirectory;
     std::filesystem::path m_currentDirectory;

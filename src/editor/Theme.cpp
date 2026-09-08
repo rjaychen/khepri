@@ -1,8 +1,7 @@
 #include "Theme.h"
-#include "Icons.h"
-#include "EmbeddedFonts.h"
 #include "../core/Logger.h"
 #include <algorithm>
+#include <cstring>
 
 namespace khepri::ui {
 
@@ -147,6 +146,40 @@ void Theme::ApplyTheme(float scale) {
     colors[ImGuiCol_ModalWindowDimBg]      = ImVec4(0.0f, 0.0f, 0.0f, 0.65f);
 }
 
+void Theme::ResetState() {
+    s_contentScale = 1.0f;
+    s_userScale    = 1.0f;
+    FontDefault    = nullptr;
+    FontTitle      = nullptr;
+    FontHeader     = nullptr;
+    FontSmall      = nullptr;
+    FontMono       = nullptr;
+}
+
+std::filesystem::path Theme::FindAssetDirectory(const std::string& subDir) {
+    std::vector<std::filesystem::path> searchRoots = {
+        std::filesystem::current_path() / "assets",
+        std::filesystem::current_path() / "../assets",
+        std::filesystem::current_path() / "../../assets",
+        std::filesystem::current_path() / "../../../assets"
+    };
+    for (const auto& root : searchRoots) {
+        if (std::filesystem::exists(root) && std::filesystem::is_directory(root)) {
+            if (subDir.empty()) {
+                try { return std::filesystem::canonical(root); }
+                catch (...) { return std::filesystem::absolute(root); }
+            }
+            auto target = root / subDir;
+            if (std::filesystem::exists(target)) {
+                try { return std::filesystem::canonical(target); }
+                catch (...) { return std::filesystem::absolute(target); }
+            }
+        }
+    }
+    std::filesystem::path fallback = subDir.empty() ? std::filesystem::path("assets") : std::filesystem::path("assets") / subDir;
+    return std::filesystem::absolute(fallback);
+}
+
 void Theme::LoadFonts(ImGuiIO& io, float scale, const std::string& fontDir) {
     if (scale <= 0.0f) scale = 1.0f;
 
@@ -159,13 +192,11 @@ void Theme::LoadFonts(ImGuiIO& io, float scale, const std::string& fontDir) {
     const float smallSize  = 11.0f * scale;
     const float monoSize   = 13.0f * scale;
 
-    // Potential font search paths
+    // Potential font search paths using unified asset discovery
     std::vector<std::filesystem::path> fontSearchDirs = {
         std::filesystem::path(fontDir),
+        FindAssetDirectory("fonts"),
         std::filesystem::current_path() / "assets/fonts",
-        std::filesystem::current_path() / "../assets/fonts",
-        std::filesystem::current_path() / "../../assets/fonts",
-        std::filesystem::current_path() / "../../../assets/fonts",
         "C:/Windows/Fonts"
     };
 
@@ -211,7 +242,7 @@ void Theme::LoadFonts(ImGuiIO& io, float scale, const std::string& fontDir) {
         fontCfg.OversampleH = 3;
         fontCfg.OversampleV = 3;
         fontCfg.RasterizerMultiply = 1.05f;
-        strncpy(fontCfg.Name, name, sizeof(fontCfg.Name) - 1);
+        std::snprintf(fontCfg.Name, sizeof(fontCfg.Name), "%s", name);
 
         ImFont* font = nullptr;
         if (!fontPath.empty() && std::filesystem::exists(fontPath)) {

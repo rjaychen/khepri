@@ -1,5 +1,4 @@
 #include "ThumbnailCache.h"
-#include "Icons.h"
 #include "Theme.h"
 #include "../core/Logger.h"
 #include <backends/imgui_impl_vulkan.h>

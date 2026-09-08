@@ -43,3 +43,10 @@ TEST(AssetManagerOverhaulTest, SelectionManagement) {
     panel.ClearSelection();
     EXPECT_TRUE(panel.GetSelectedPath().empty());
 }
+
+TEST(AssetManagerOverhaulTest, CacheInvalidation) {
+    khepri::AssetManagerPanel panel;
+    panel.InvalidateCache();
+    // Cache invalidation executes cleanly
+}
+

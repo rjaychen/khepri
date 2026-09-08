@@ -107,6 +107,7 @@ private:
 
     // UI & DPI Scale
     float m_uiScale = 1.0f;
+    float m_pendingFontScale = 0.0f;
 
     // Window Visibility Toggles
     bool m_showViewport = true;

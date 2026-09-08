@@ -38,28 +38,35 @@ MeshComponent::MeshComponent(VulkanContext* context, const std::vector<Vertex>& 
         VMA_MEMORY_USAGE_GPU_ONLY
     );
     Buffer::CopyBuffer(*context, stagingIndex.GetBuffer(), m_indexBuffer->GetBuffer(), indexSize);
+    CalculateBoundingBox();
+}
+
+void MeshComponent::CalculateBoundingBox() {
+    if (m_vertices.empty()) {
+        m_boundingBoxMin = glm::vec3(0.0f);
+        m_boundingBoxMax = glm::vec3(0.0f);
+        return;
+    }
+    m_boundingBoxMin = m_vertices[0].position;
+    m_boundingBoxMax = m_vertices[0].position;
+    for (const auto& v : m_vertices) {
+        m_boundingBoxMin = glm::min(m_boundingBoxMin, v.position);
+        m_boundingBoxMax = glm::max(m_boundingBoxMax, v.position);
+    }
 }
 
 glm::vec3 MeshComponent::GetBoundingBoxCenter() const {
-    if (m_vertices.empty()) return glm::vec3(0.0f);
-    glm::vec3 minP = m_vertices[0].position;
-    glm::vec3 maxP = m_vertices[0].position;
-    for (const auto& v : m_vertices) {
-        minP = glm::min(minP, v.position);
-        maxP = glm::max(maxP, v.position);
-    }
-    return (minP + maxP) * 0.5f;
+    return (m_boundingBoxMin + m_boundingBoxMax) * 0.5f;
 }
 
 float MeshComponent::GetBoundingBoxRadius() const {
     if (m_vertices.empty()) return 1.0f;
-    glm::vec3 minP = m_vertices[0].position;
-    glm::vec3 maxP = m_vertices[0].position;
-    for (const auto& v : m_vertices) {
-        minP = glm::min(minP, v.position);
-        maxP = glm::max(maxP, v.position);
-    }
-    return std::max(0.5f, glm::length(maxP - minP) * 0.5f);
+    return std::max(0.5f, glm::length(m_boundingBoxMax - m_boundingBoxMin) * 0.5f);
+}
+
+void MeshComponent::GetBoundingBox(glm::vec3& outMin, glm::vec3& outMax) const noexcept {
+    outMin = m_boundingBoxMin;
+    outMax = m_boundingBoxMax;
 }
 
 void MeshComponent::Draw(VkCommandBuffer cmd) const {

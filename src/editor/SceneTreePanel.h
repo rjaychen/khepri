@@ -19,8 +19,8 @@ namespace khepri::core { class UndoStack; }
 
 class SceneTreePanel {
 public:
-    SceneTreePanel(VulkanContext* context = nullptr);
-    SceneTreePanel(VulkanContext& context);
+    explicit SceneTreePanel(VulkanContext* context = nullptr);
+    explicit SceneTreePanel(VulkanContext& context);
     ~SceneTreePanel() = default;
 
     // activeMesh is updated when a new primitive is added so EditorApp can focus camera on it.

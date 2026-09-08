@@ -238,14 +238,14 @@ void ViewportPanel::RenderUI(Camera& camera, VkDescriptorSet& viewportTextureDS,
     ImGui::SameLine();
     ImGui::SetNextItemWidth(120.0f);
     const char* aaOptions[] = { "AA: Off (1x)", "AA: 2x MSAA", "AA: 4x MSAA", "AA: 8x (Best)" };
-    int currentAA = 3;
-    if (m_msaaSamples == VK_SAMPLE_COUNT_1_BIT) currentAA = 0;
+    int currentAA = 2; // Default 4x
+    if (m_msaaSamples <= VK_SAMPLE_COUNT_1_BIT) currentAA = 0;
     else if (m_msaaSamples == VK_SAMPLE_COUNT_2_BIT) currentAA = 1;
     else if (m_msaaSamples == VK_SAMPLE_COUNT_4_BIT) currentAA = 2;
-    else if (m_msaaSamples == VK_SAMPLE_COUNT_8_BIT) currentAA = 3;
+    else currentAA = 3;
 
     if (ImGui::Combo("##AA", &currentAA, aaOptions, IM_ARRAYSIZE(aaOptions))) {
-        VkSampleCountFlagBits newSamples = VK_SAMPLE_COUNT_8_BIT;
+        VkSampleCountFlagBits newSamples = VK_SAMPLE_COUNT_4_BIT;
         if (currentAA == 0) newSamples = VK_SAMPLE_COUNT_1_BIT;
         else if (currentAA == 1) newSamples = VK_SAMPLE_COUNT_2_BIT;
         else if (currentAA == 2) newSamples = VK_SAMPLE_COUNT_4_BIT;
@@ -257,7 +257,7 @@ void ViewportPanel::RenderUI(Camera& camera, VkDescriptorSet& viewportTextureDS,
         SetMSAASamples(newSamples);
     }
     if (ImGui::IsItemHovered()) {
-        ImGui::SetTooltip("Anti-Aliasing Quality\n8x MSAA provides smooth hardware edge anti-aliasing for viewport rendering.");
+        ImGui::SetTooltip("Hardware multi-sample anti-aliasing quality for viewport rendering.");
     }
 
     ImGui::SameLine();
@@ -330,14 +330,36 @@ void ViewportPanel::RenderUI(Camera& camera, VkDescriptorSet& viewportTextureDS,
                 break;
         }
 
-        if (targetWidth != m_width || targetHeight != m_height || m_needTextureUpdate) {
-            bool dimsChanged = (targetWidth != m_width || targetHeight != m_height);
+        bool dimsChanged = (targetWidth != m_width || targetHeight != m_height);
+        auto now = std::chrono::steady_clock::now();
+
+        if (dimsChanged) {
+            m_pendingWidth = targetWidth;
+            m_pendingHeight = targetHeight;
+            m_lastResizeRequestTime = now;
+            m_resizePending = true;
+        }
+
+        // Debounce framebuffer recreation:
+        // Execute immediately if first creation (m_colorImage == VK_NULL_HANDLE),
+        // or user is not holding left mouse,
+        // or dimensions have remained stable for >120ms.
+        bool shouldExecuteResize = false;
+        if (m_resizePending) {
+            auto elapsedMs = std::chrono::duration_cast<std::chrono::milliseconds>(now - m_lastResizeRequestTime).count();
+            if (m_colorImage == VK_NULL_HANDLE || !ImGui::IsMouseDown(ImGuiMouseButton_Left) || elapsedMs > 120) {
+                shouldExecuteResize = true;
+                m_resizePending = false;
+            }
+        }
+
+        if (shouldExecuteResize || m_needTextureUpdate) {
             m_needTextureUpdate = false;
             VkDescriptorSet oldDS = viewportTextureDS;
             viewportTextureDS = VK_NULL_HANDLE;
-            if (dimsChanged) {
-                CreateFramebuffer(targetWidth, targetHeight);
-                camera.SetViewportSize(static_cast<float>(targetWidth), static_cast<float>(targetHeight));
+            if (shouldExecuteResize) {
+                CreateFramebuffer(m_pendingWidth, m_pendingHeight);
+                camera.SetViewportSize(static_cast<float>(m_pendingWidth), static_cast<float>(m_pendingHeight));
             }
             if (oldDS != VK_NULL_HANDLE) {
                 ImGui_ImplVulkan_RemoveTexture(oldDS);
@@ -598,7 +620,7 @@ SceneNode* ViewportPanel::RaycastScene(
     SceneNode* closestNode = nullptr;
     float closestDist = std::numeric_limits<float>::max();
 
-    std::function<void(const SceneNode*)> traverse = [&](const SceneNode* node) {
+    auto traverse = [&](auto& self, const SceneNode* node) -> void {
         if (!node || !node->visible) return;
 
         if (node->mesh) {
@@ -608,26 +630,51 @@ SceneNode* ViewportPanel::RaycastScene(
             glm::vec3 localOrigin = glm::vec3(invWorld * glm::vec4(ray.origin, 1.0f));
             glm::vec3 localDir = glm::normalize(glm::vec3(invWorld * glm::vec4(ray.direction, 0.0f)));
 
-            glm::vec3 center = node->mesh->GetBoundingBoxCenter();
-            float radius = node->mesh->GetBoundingBoxRadius();
-            if (radius < 0.001f) radius = 0.5f;
+            glm::vec3 boxMin, boxMax;
+            node->mesh->GetBoundingBox(boxMin, boxMax);
 
-            glm::vec3 oc = localOrigin - center;
-            float b = glm::dot(oc, localDir);
-            float c = glm::dot(oc, oc) - radius * radius;
-            float discriminant = b * b - c;
+            // Expand thin/flat AABBs (e.g. 2D Planes/quads) so picking isn't mathematically zero-thickness
+            constexpr float kMinThickness = 0.05f;
+            for (int a = 0; a < 3; ++a) {
+                if (boxMax[a] - boxMin[a] < kMinThickness) {
+                    float mid = (boxMin[a] + boxMax[a]) * 0.5f;
+                    boxMin[a] = mid - kMinThickness * 0.5f;
+                    boxMax[a] = mid + kMinThickness * 0.5f;
+                }
+            }
 
-            if (discriminant >= 0.0f) {
-                float sqrtD = std::sqrt(discriminant);
-                float t = -b - sqrtD;
-                if (t < 0.0f) t = -b + sqrtD;
-                if (t > 0.0f) {
-                    glm::vec3 worldHit = glm::vec3(worldMat * glm::vec4(localOrigin + localDir * t, 1.0f));
-                    float worldDist = glm::distance(ray.origin, worldHit);
-                    if (worldDist < closestDist) {
-                        closestDist = worldDist;
-                        closestNode = const_cast<SceneNode*>(node);
+            // Ray-AABB Slab intersection test in local coordinate space
+            float tNear = 0.0f;
+            float tFar = std::numeric_limits<float>::max();
+            bool hit = true;
+
+            for (int a = 0; a < 3; ++a) {
+                if (std::abs(localDir[a]) < 1e-7f) {
+                    if (localOrigin[a] < boxMin[a] || localOrigin[a] > boxMax[a]) {
+                        hit = false;
+                        break;
                     }
+                } else {
+                    float invD = 1.0f / localDir[a];
+                    float t0 = (boxMin[a] - localOrigin[a]) * invD;
+                    float t1 = (boxMax[a] - localOrigin[a]) * invD;
+                    if (t0 > t1) std::swap(t0, t1);
+                    tNear = std::max(tNear, t0);
+                    tFar = std::min(tFar, t1);
+                    if (tNear > tFar) {
+                        hit = false;
+                        break;
+                    }
+                }
+            }
+
+            if (hit && tFar > 0.0f) {
+                float tHit = (tNear > 0.0f) ? tNear : tFar;
+                glm::vec3 worldHit = glm::vec3(worldMat * glm::vec4(localOrigin + localDir * tHit, 1.0f));
+                float worldDist = glm::distance(ray.origin, worldHit);
+                if (worldDist < closestDist) {
+                    closestDist = worldDist;
+                    closestNode = const_cast<SceneNode*>(node);
                 }
             }
         } else if (node->lightComponent) {
@@ -650,15 +697,15 @@ SceneNode* ViewportPanel::RaycastScene(
         }
 
         for (const auto& child : node->GetChildren()) {
-            traverse(child.get());
+            self(self, child.get());
         }
     };
 
     for (const auto& child : rootNode->GetChildren()) {
-        traverse(child.get());
+        traverse(traverse, child.get());
     }
     if (!closestNode && rootNode->mesh) {
-        traverse(rootNode);
+        traverse(traverse, rootNode);
     }
 
     return closestNode;

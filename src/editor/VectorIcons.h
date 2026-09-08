@@ -32,8 +32,8 @@ enum class VectorIconType {
 };
 
 /**
- * @brief High-performance procedural vector graphics icons drawn via ImDrawList.
- * Resolution-independent, razor-sharp on HiDPI, and perfectly styled.
+ * @brief Procedural vector graphics icons drawn via ImDrawList.
+ * Supports DPI scaling and custom tinting.
  */
 class VectorIcons {
 public:

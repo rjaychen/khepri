@@ -1,7 +1,6 @@
 #include <gtest/gtest.h>
 #include <gmock/gmock.h>
 #include "../src/editor/Theme.h"
-#include "../src/editor/Icons.h"
 #include "../src/editor/UIWidgets.h"
 #include "../src/editor/ThumbnailCache.h"
 
@@ -9,7 +8,17 @@
 // UI Theme, Typography & Design System Unit Tests
 // ---------------------------------------------------------------------------
 
-TEST(UIThemeTest, ThemeColorTokensMatchOryzoPalette) {
+class UIThemeTestFixture : public ::testing::Test {
+protected:
+    void SetUp() override {
+        khepri::ui::Theme::ResetState();
+    }
+    void TearDown() override {
+        khepri::ui::Theme::ResetState();
+    }
+};
+
+TEST_F(UIThemeTestFixture, ThemeColorTokensMatchOryzoPalette) {
     EXPECT_FLOAT_EQ(khepri::ui::Theme::COLOR_BG_DARK.w, 1.0f);
     EXPECT_LT(khepri::ui::Theme::COLOR_BG_DARK.x, 0.1f);
     EXPECT_GT(khepri::ui::Theme::COLOR_ACCENT_PRIMARY.z, 0.9f);
@@ -17,7 +26,7 @@ TEST(UIThemeTest, ThemeColorTokensMatchOryzoPalette) {
     EXPECT_LT(khepri::ui::Theme::COLOR_TEXT_MUTED.x, 0.4f);
 }
 
-TEST(UIThemeTest, ApplyThemeSetsImGuiStyleAndScaling) {
+TEST_F(UIThemeTestFixture, ApplyThemeSetsImGuiStyleAndScaling) {
     IMGUI_CHECKVERSION();
     ImGuiContext* ctx = ImGui::CreateContext();
     ASSERT_NE(ctx, nullptr);
@@ -40,18 +49,13 @@ TEST(UIThemeTest, ApplyThemeSetsImGuiStyleAndScaling) {
     ImGui::DestroyContext(ctx);
 }
 
-TEST(UIThemeTest, ScaleCalculationHierarchy) {
+TEST_F(UIThemeTestFixture, ScaleCalculationHierarchy) {
     khepri::ui::Theme::SetContentScale(1.25f);
     khepri::ui::Theme::SetUserScale(1.5f);
 
     EXPECT_FLOAT_EQ(khepri::ui::Theme::GetContentScale(), 1.25f);
     EXPECT_FLOAT_EQ(khepri::ui::Theme::GetUserScale(), 1.5f);
     EXPECT_FLOAT_EQ(khepri::ui::Theme::GetTotalScale(), 1.25f * 1.5f);
-
-    // Reset
-    khepri::ui::Theme::SetContentScale(1.0f);
-    khepri::ui::Theme::SetUserScale(1.0f);
-    EXPECT_FLOAT_EQ(khepri::ui::Theme::GetTotalScale(), 1.0f);
 }
 
 TEST(UIThemeTest, ThumbnailCacheCategoryClassification) {

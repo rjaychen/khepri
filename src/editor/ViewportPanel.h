@@ -78,8 +78,12 @@ private:
     std::function<void(SceneNode*)> m_onSelectNode;
     uint32_t m_width = 800;
     uint32_t m_height = 600;
+    uint32_t m_pendingWidth = 0;
+    uint32_t m_pendingHeight = 0;
+    std::chrono::steady_clock::time_point m_lastResizeRequestTime;
+    bool m_resizePending = false;
     ResolutionMode m_resMode = ResolutionMode::FitPanel;
-    VkSampleCountFlagBits m_msaaSamples = VK_SAMPLE_COUNT_8_BIT; // Default: 8x MSAA (Best Anti-Aliasing!)
+    VkSampleCountFlagBits m_msaaSamples = VK_SAMPLE_COUNT_4_BIT; // Hardware MSAA (default 4x)
     bool m_needTextureUpdate = false;
     bool m_isFocused = false;
     bool m_isHovered = false;

@@ -1,5 +1,4 @@
 #include "UIWidgets.h"
-#include "Icons.h"
 #include <imgui_internal.h>
 #include <algorithm>
 
@@ -37,25 +36,28 @@ void UIWidgets::DrawCard(ImDrawList* drawList, const ImVec2& minPos, const ImVec
 
 void UIWidgets::DrawBadge(const char* text, const ImVec4& bgColor, const ImVec4& textColor,
                           float rounding) {
+    float scale = Theme::GetTotalScale();
     Theme::PushFontSmall();
 
     ImVec2 textSize = ImGui::CalcTextSize(text);
-    ImVec2 padding(6.0f, 2.0f);
+    ImVec2 padding(6.0f * scale, 2.0f * scale);
     ImVec2 badgeSize(textSize.x + padding.x * 2.0f, textSize.y + padding.y * 2.0f);
 
     ImVec2 cursor = ImGui::GetCursorScreenPos();
-    ImDrawList* drawList = ImGui::GetWindowDrawList();
-
-    ImVec2 minPos = cursor;
-    ImVec2 maxPos = ImVec2(cursor.x + badgeSize.x, cursor.y + badgeSize.y);
-
-    drawList->AddRectFilled(minPos, maxPos, ImGui::GetColorU32(bgColor), rounding);
-    drawList->AddRect(minPos, maxPos, ImGui::GetColorU32(ImVec4(textColor.x, textColor.y, textColor.z, 0.4f)), rounding, 0, 1.0f);
-
-    ImVec2 textPos = ImVec2(cursor.x + padding.x, cursor.y + padding.y);
-    drawList->AddText(textPos, ImGui::GetColorU32(textColor), text);
-
     ImGui::Dummy(badgeSize);
+
+    if (ImGui::IsItemVisible()) {
+        ImDrawList* drawList = ImGui::GetWindowDrawList();
+        ImVec2 minPos = cursor;
+        ImVec2 maxPos = ImVec2(cursor.x + badgeSize.x, cursor.y + badgeSize.y);
+
+        drawList->AddRectFilled(minPos, maxPos, ImGui::GetColorU32(bgColor), rounding * scale);
+        drawList->AddRect(minPos, maxPos, ImGui::GetColorU32(ImVec4(textColor.x, textColor.y, textColor.z, 0.4f)), rounding * scale, 0, 1.0f);
+
+        ImVec2 textPos = ImVec2(cursor.x + padding.x, cursor.y + padding.y);
+        drawList->AddText(textPos, ImGui::GetColorU32(textColor), text);
+    }
+
     Theme::PopFont();
 }
 

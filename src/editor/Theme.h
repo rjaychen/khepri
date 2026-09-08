@@ -77,6 +77,10 @@ public:
     static void PushFontMono();
     static void PopFont();
 
+    // State and Resource Helpers
+    static void ResetState();
+    static std::filesystem::path FindAssetDirectory(const std::string& subDir = "");
+
     // Scale State Management
     static float GetContentScale() { return s_contentScale; }
     static void SetContentScale(float scale) { s_contentScale = scale; }
