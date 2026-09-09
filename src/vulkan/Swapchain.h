@@ -5,6 +5,7 @@
 #include <memory>
 #include "VulkanContext.h"
 #include "Buffer.h"
+#include "VulkanSync.h"
 
 struct SwapchainSupportDetails {
     VkSurfaceCapabilitiesKHR capabilities;
@@ -38,9 +39,9 @@ public:
 
     // imageAvailableSemaphores[imageIndex] is the semaphore to wait on before rendering to that image.
     // Always read this AFTER AcquireNextImage() returns the imageIndex.
-    VkSemaphore GetImageAvailableSemaphore(uint32_t imageIndex) const { return m_imageAvailableSemaphores[imageIndex]; }
-    VkSemaphore GetRenderFinishedSemaphore(uint32_t imageIndex) const { return m_renderFinishedSemaphores[imageIndex]; }
-    VkFence GetInFlightFence(uint32_t frame) const { return m_inFlightFences[frame]; }
+    VkSemaphore GetImageAvailableSemaphore(uint32_t imageIndex) const { return m_imageAvailableSemaphores[imageIndex].GetHandle(); }
+    VkSemaphore GetRenderFinishedSemaphore(uint32_t imageIndex) const { return m_renderFinishedSemaphores[imageIndex].GetHandle(); }
+    VkFence GetInFlightFence(uint32_t frame) const { return m_inFlightFences[frame].GetHandle(); }
 
     static SwapchainSupportDetails QuerySupport(VkPhysicalDevice device, VkSurfaceKHR surface);
 
@@ -72,9 +73,9 @@ private:
     // Per-swapchain-image semaphores (indexed by imageIndex returned from vkAcquireNextImageKHR).
     // A spare semaphore is used during acquire and then swapped in so each image always
     // owns its semaphore and cannot be reused while the display engine still holds it.
-    std::vector<VkSemaphore> m_imageAvailableSemaphores; // size = image count
-    VkSemaphore m_spareSemaphore = VK_NULL_HANDLE;       // rotating acquire target
-    std::vector<VkSemaphore> m_renderFinishedSemaphores;
-    std::vector<VkFence> m_inFlightFences;
+    std::vector<khepri::VulkanSemaphore> m_imageAvailableSemaphores; // size = image count
+    khepri::VulkanSemaphore m_spareSemaphore;       // rotating acquire target
+    std::vector<khepri::VulkanSemaphore> m_renderFinishedSemaphores;
+    std::vector<khepri::VulkanFence> m_inFlightFences;
     uint32_t m_currentFrame = 0;
 };

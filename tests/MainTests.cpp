@@ -300,16 +300,16 @@ TEST(AnimationTimelineTest, KeyframeNodePoseCapturesTransform) {
 #include "vulkan/VulkanUtils.h"
 
 TEST(VulkanUtilsTest, VkResultToStringMapsStandardAndCustomCodes) {
-    EXPECT_STREQ(Khepri::VkResultToString(VK_SUCCESS), "VK_SUCCESS");
-    EXPECT_STREQ(Khepri::VkResultToString(VK_NOT_READY), "VK_NOT_READY");
-    EXPECT_STREQ(Khepri::VkResultToString(VK_TIMEOUT), "VK_TIMEOUT");
-    EXPECT_STREQ(Khepri::VkResultToString(VK_ERROR_OUT_OF_HOST_MEMORY), "VK_ERROR_OUT_OF_HOST_MEMORY");
-    EXPECT_STREQ(Khepri::VkResultToString(VK_ERROR_OUT_OF_DEVICE_MEMORY), "VK_ERROR_OUT_OF_DEVICE_MEMORY");
-    EXPECT_STREQ(Khepri::VkResultToString(VK_ERROR_INITIALIZATION_FAILED), "VK_ERROR_INITIALIZATION_FAILED");
-    EXPECT_STREQ(Khepri::VkResultToString(VK_ERROR_DEVICE_LOST), "VK_ERROR_DEVICE_LOST");
-    EXPECT_STREQ(Khepri::VkResultToString(VK_ERROR_SURFACE_LOST_KHR), "VK_ERROR_SURFACE_LOST_KHR");
-    EXPECT_STREQ(Khepri::VkResultToString(VK_ERROR_OUT_OF_DATE_KHR), "VK_ERROR_OUT_OF_DATE_KHR");
-    EXPECT_STREQ(Khepri::VkResultToString(static_cast<VkResult>(-99999)), "VK_RESULT_UNRECOGNIZED");
+    EXPECT_STREQ(khepri::VkResultToString(VK_SUCCESS), "VK_SUCCESS");
+    EXPECT_STREQ(khepri::VkResultToString(VK_NOT_READY), "VK_NOT_READY");
+    EXPECT_STREQ(khepri::VkResultToString(VK_TIMEOUT), "VK_TIMEOUT");
+    EXPECT_STREQ(khepri::VkResultToString(VK_ERROR_OUT_OF_HOST_MEMORY), "VK_ERROR_OUT_OF_HOST_MEMORY");
+    EXPECT_STREQ(khepri::VkResultToString(VK_ERROR_OUT_OF_DEVICE_MEMORY), "VK_ERROR_OUT_OF_DEVICE_MEMORY");
+    EXPECT_STREQ(khepri::VkResultToString(VK_ERROR_INITIALIZATION_FAILED), "VK_ERROR_INITIALIZATION_FAILED");
+    EXPECT_STREQ(khepri::VkResultToString(VK_ERROR_DEVICE_LOST), "VK_ERROR_DEVICE_LOST");
+    EXPECT_STREQ(khepri::VkResultToString(VK_ERROR_SURFACE_LOST_KHR), "VK_ERROR_SURFACE_LOST_KHR");
+    EXPECT_STREQ(khepri::VkResultToString(VK_ERROR_OUT_OF_DATE_KHR), "VK_ERROR_OUT_OF_DATE_KHR");
+    EXPECT_STREQ(khepri::VkResultToString(static_cast<VkResult>(-99999)), "VK_RESULT_UNRECOGNIZED");
 }
 
 TEST(VulkanUtilsTest, CheckVulkanResultSucceedsOnVkSuccess) {
@@ -336,7 +336,7 @@ TEST(VulkanUtilsTest, CheckVulkanResultThrowsDescriptiveRuntimeErrorOnFailure) {
 #include "vulkan/PhysicalDevice.h"
 
 TEST(PhysicalDeviceTest, QueueFamilyIndicesCompletenessCheck) {
-    Khepri::QueueFamilyIndices incomplete{};
+    khepri::QueueFamilyIndices incomplete{};
     EXPECT_FALSE(incomplete.isComplete());
 
     incomplete.graphicsFamily = 0;
@@ -350,18 +350,18 @@ TEST(PhysicalDeviceTest, QueueFamilyIndicesCompletenessCheck) {
 }
 
 TEST(PhysicalDeviceTest, EnumerateReturnsEmptyOnNullInstance) {
-    auto devices = Khepri::VulkanPhysicalDevice::Enumerate(VK_NULL_HANDLE);
+    auto devices = khepri::VulkanPhysicalDevice::Enumerate(VK_NULL_HANDLE);
     EXPECT_TRUE(devices.empty());
 }
 
 TEST(PhysicalDeviceTest, SelectBestThrowsWhenNoDevicesProvided) {
-    std::vector<Khepri::VulkanPhysicalDevice> emptyList;
+    std::vector<khepri::VulkanPhysicalDevice> emptyList;
     std::vector<const char*> requiredExtensions = { VK_KHR_SWAPCHAIN_EXTENSION_NAME };
-    EXPECT_THROW(Khepri::VulkanPhysicalDevice::SelectBest(emptyList, requiredExtensions), std::runtime_error);
+    EXPECT_THROW(khepri::VulkanPhysicalDevice::SelectBest(emptyList, requiredExtensions), std::runtime_error);
 }
 
 TEST(PhysicalDeviceTest, SwapchainSupportDetailsAdequacyCheck) {
-    Khepri::SwapchainSupportDetails details{};
+    khepri::SwapchainSupportDetails details{};
     EXPECT_FALSE(details.IsAdequate());
 
     details.formats.push_back(VkSurfaceFormatKHR{ VK_FORMAT_B8G8R8A8_UNORM, VK_COLOR_SPACE_SRGB_NONLINEAR_KHR });

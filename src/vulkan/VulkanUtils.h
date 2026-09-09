@@ -5,7 +5,7 @@
 #include <stdexcept>
 #include "../core/Logger.h"
 
-namespace Khepri {
+namespace khepri {
 
 inline const char* VkResultToString(VkResult result) {
     switch (result) {
@@ -60,7 +60,7 @@ inline void CheckVulkanResult(VkResult result, const char* message, const char* 
     }
 }
 
-} // namespace Khepri
+} // namespace khepri
 
-#define CHECK_VK_RESULT(result, msg) ::Khepri::CheckVulkanResult((result), (msg), __FILE__, __LINE__)
+#define CHECK_VK_RESULT(result, msg) ::khepri::CheckVulkanResult((result), (msg), __FILE__, __LINE__)
 #define VK_CHECK(expr) CHECK_VK_RESULT((expr), #expr)

@@ -11,9 +11,9 @@
 #include "PhysicalDevice.h"
 #include "VulkanQueue.h"
 
-using QueueFamilyIndices = Khepri::QueueFamilyIndices;
-using VulkanPhysicalDevice = Khepri::VulkanPhysicalDevice;
-using VulkanQueue = Khepri::VulkanQueue;
+using QueueFamilyIndices = khepri::QueueFamilyIndices;
+using VulkanPhysicalDevice = khepri::VulkanPhysicalDevice;
+using VulkanQueue = khepri::VulkanQueue;
 
 class VulkanContext {
 public:
@@ -25,24 +25,24 @@ public:
 
     VkInstance GetInstance() const { return m_instance; }
     VkPhysicalDevice GetPhysicalDevice() const { return m_physicalDevice.GetHandle(); }
-    const Khepri::VulkanPhysicalDevice& GetPhysicalDeviceInfo() const { return m_physicalDevice; }
-    const std::vector<Khepri::VulkanPhysicalDevice>& GetAvailablePhysicalDevices() const { return m_availableDevices; }
+    const khepri::VulkanPhysicalDevice& GetPhysicalDeviceInfo() const { return m_physicalDevice; }
+    const std::vector<khepri::VulkanPhysicalDevice>& GetAvailablePhysicalDevices() const { return m_availableDevices; }
 
     VkDevice GetDevice() const { return m_device; }
     VkSurfaceKHR GetSurface() const { return m_surface; }
-    const Khepri::VulkanQueue& GetGraphicsQueue() const { return *m_graphicsQueue; }
-    Khepri::VulkanQueue& GetGraphicsQueue() { return *m_graphicsQueue; }
+    const khepri::VulkanQueue& GetGraphicsQueue() const { return *m_graphicsQueue; }
+    khepri::VulkanQueue& GetGraphicsQueue() { return *m_graphicsQueue; }
 
-    const Khepri::VulkanQueue& GetPresentQueue() const { return *m_presentQueue; }
-    Khepri::VulkanQueue& GetPresentQueue() { return *m_presentQueue; }
+    const khepri::VulkanQueue& GetPresentQueue() const { return *m_presentQueue; }
+    khepri::VulkanQueue& GetPresentQueue() { return *m_presentQueue; }
 
-    const Khepri::VulkanQueue& GetComputeQueue() const { return *m_computeQueue; }
-    Khepri::VulkanQueue& GetComputeQueue() { return *m_computeQueue; }
+    const khepri::VulkanQueue& GetComputeQueue() const { return *m_computeQueue; }
+    khepri::VulkanQueue& GetComputeQueue() { return *m_computeQueue; }
 
     VkQueue GetGraphicsQueueHandle() const { return m_graphicsQueue ? m_graphicsQueue->GetHandle() : VK_NULL_HANDLE; }
     VkQueue GetPresentQueueHandle() const { return m_presentQueue ? m_presentQueue->GetHandle() : VK_NULL_HANDLE; }
     VkQueue GetComputeQueueHandle() const { return m_computeQueue ? m_computeQueue->GetHandle() : VK_NULL_HANDLE; }
-    Khepri::QueueFamilyIndices GetQueueFamilies() const { return m_physicalDevice.GetQueueFamilies(); }
+    khepri::QueueFamilyIndices GetQueueFamilies() const { return m_physicalDevice.GetQueueFamilies(); }
     VmaAllocator GetAllocator() const { return m_allocator; }
     VkPhysicalDeviceProperties GetDeviceProperties() const { return m_physicalDevice.GetProperties(); }
     VkSampleCountFlagBits GetMaxUsableSampleCount() const {
@@ -86,14 +86,14 @@ private:
     VkDebugUtilsMessengerEXT m_debugMessenger = VK_NULL_HANDLE;
     VkSurfaceKHR m_surface = VK_NULL_HANDLE;
 
-    Khepri::VulkanPhysicalDevice m_physicalDevice;
-    std::vector<Khepri::VulkanPhysicalDevice> m_availableDevices;
+    khepri::VulkanPhysicalDevice m_physicalDevice;
+    std::vector<khepri::VulkanPhysicalDevice> m_availableDevices;
 
     VkDevice m_device = VK_NULL_HANDLE;
 
-    std::unique_ptr<Khepri::VulkanQueue> m_graphicsQueue;
-    std::unique_ptr<Khepri::VulkanQueue> m_presentQueue;
-    std::unique_ptr<Khepri::VulkanQueue> m_computeQueue;
+    std::unique_ptr<khepri::VulkanQueue> m_graphicsQueue;
+    std::unique_ptr<khepri::VulkanQueue> m_presentQueue;
+    std::unique_ptr<khepri::VulkanQueue> m_computeQueue;
 
     VmaAllocator m_allocator = VK_NULL_HANDLE;
 

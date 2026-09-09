@@ -5,6 +5,7 @@
 #include "../assets/AssetManager.h"
 #include "../scene/LightNode.h"
 #include "../vulkan/VulkanUtils.h"
+#include "../vulkan/CommandBuffer.h"
 #include <glm/gtc/matrix_transform.hpp>
 #include <chrono>
 #include <fstream>
@@ -863,9 +864,7 @@ void EditorApp::RenderViewportOffscreen(VkCommandBuffer cmd) {
 }
 
 void EditorApp::RecordCommandBuffer(VkCommandBuffer cmd, uint32_t imageIndex) {
-    VkCommandBufferBeginInfo beginInfo{};
-    beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-    vkBeginCommandBuffer(cmd, &beginInfo);
+    khepri::ScopedCommandBuffer scopedCmd(cmd);
 
     // 1. Offscreen 3D Viewport Pass
     RenderViewportOffscreen(cmd);
@@ -925,8 +924,6 @@ void EditorApp::RecordCommandBuffer(VkCommandBuffer cmd, uint32_t imageIndex) {
             VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
             0, 0, nullptr, 0, nullptr, 1, &barrier);
     }
-
-    vkEndCommandBuffer(cmd);
 }
 
 void EditorApp::Run() {
@@ -1039,7 +1036,7 @@ void EditorApp::Run() {
         vkResetCommandBuffer(cmd, 0);
         RecordCommandBuffer(cmd, imageIndex);
 
-        Khepri::QueueSubmitDescriptor submitDesc{};
+        khepri::QueueSubmitDescriptor submitDesc{};
         submitDesc.commandBuffer = cmd;
         submitDesc.waitSemaphore = m_swapchain->GetImageAvailableSemaphore(imageIndex);
         submitDesc.waitStageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;

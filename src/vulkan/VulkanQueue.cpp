@@ -1,7 +1,7 @@
 #include "VulkanQueue.h"
 #include "VulkanUtils.h"
 
-namespace Khepri {
+namespace khepri {
 
 VulkanQueue::VulkanQueue(VkDevice device, VkQueue queue, uint32_t familyIndex, uint32_t queueIndex, VkQueueFlags flags)
     : m_device(device), m_queue(queue), m_familyIndex(familyIndex), m_queueIndex(queueIndex), m_flags(flags) {}
@@ -103,4 +103,4 @@ VkResult VulkanQueue::WaitIdle() const {
     return vkQueueWaitIdle(m_queue);
 }
 
-} // namespace Khepri
+} // namespace khepri
