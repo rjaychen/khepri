@@ -5,7 +5,7 @@
 namespace {
 
 TEST(VulkanQueueTest, DefaultConstructorInitializesNull) {
-    Khepri::VulkanQueue queue;
+    khepri::VulkanQueue queue;
     EXPECT_EQ(queue.GetHandle(), VK_NULL_HANDLE);
     EXPECT_EQ(queue.GetDevice(), VK_NULL_HANDLE);
     EXPECT_EQ(queue.GetFamilyIndex(), 0u);
@@ -25,7 +25,7 @@ TEST(VulkanQueueTest, ParameterizedConstructorSetsProperties) {
     const uint32_t queueIndex = 1;
     const VkQueueFlags flags = VK_QUEUE_GRAPHICS_BIT | VK_QUEUE_COMPUTE_BIT | VK_QUEUE_TRANSFER_BIT;
 
-    Khepri::VulkanQueue queue(dummyDevice, dummyQueue, familyIndex, queueIndex, flags);
+    khepri::VulkanQueue queue(dummyDevice, dummyQueue, familyIndex, queueIndex, flags);
 
     EXPECT_EQ(queue.GetHandle(), dummyQueue);
     EXPECT_EQ(queue.GetDevice(), dummyDevice);
@@ -44,10 +44,10 @@ TEST(VulkanQueueTest, MoveConstructorTransfersOwnership) {
     auto dummyDevice = reinterpret_cast<VkDevice>(0x1234);
     auto dummyQueue = reinterpret_cast<VkQueue>(0x5678);
 
-    Khepri::VulkanQueue original(dummyDevice, dummyQueue, 0, 0, VK_QUEUE_GRAPHICS_BIT);
+    khepri::VulkanQueue original(dummyDevice, dummyQueue, 0, 0, VK_QUEUE_GRAPHICS_BIT);
     EXPECT_TRUE(original.IsValid());
 
-    Khepri::VulkanQueue moved(std::move(original));
+    khepri::VulkanQueue moved(std::move(original));
     EXPECT_TRUE(moved.IsValid());
     EXPECT_EQ(moved.GetHandle(), dummyQueue);
     EXPECT_FALSE(original.IsValid());
@@ -58,8 +58,8 @@ TEST(VulkanQueueTest, MoveAssignmentTransfersOwnership) {
     auto dummyDevice = reinterpret_cast<VkDevice>(0x1234);
     auto dummyQueue = reinterpret_cast<VkQueue>(0x5678);
 
-    Khepri::VulkanQueue original(dummyDevice, dummyQueue, 1, 0, VK_QUEUE_COMPUTE_BIT);
-    Khepri::VulkanQueue target;
+    khepri::VulkanQueue original(dummyDevice, dummyQueue, 1, 0, VK_QUEUE_COMPUTE_BIT);
+    khepri::VulkanQueue target;
 
     target = std::move(original);
     EXPECT_TRUE(target.IsValid());
@@ -69,9 +69,9 @@ TEST(VulkanQueueTest, MoveAssignmentTransfersOwnership) {
 }
 
 TEST(VulkanQueueTest, UninitializedQueueMethodsReturnErrorGracefully) {
-    Khepri::VulkanQueue nullQueue;
+    khepri::VulkanQueue nullQueue;
 
-    Khepri::QueueSubmitDescriptor desc{};
+    khepri::QueueSubmitDescriptor desc{};
     EXPECT_EQ(nullQueue.Submit(desc), VK_ERROR_INITIALIZATION_FAILED);
     EXPECT_EQ(nullQueue.SubmitAndWait(VK_NULL_HANDLE), VK_ERROR_INITIALIZATION_FAILED);
 
@@ -81,7 +81,7 @@ TEST(VulkanQueueTest, UninitializedQueueMethodsReturnErrorGracefully) {
 }
 
 TEST(VulkanQueueTest, QueueSubmitDescriptorDefaultValues) {
-    Khepri::QueueSubmitDescriptor desc;
+    khepri::QueueSubmitDescriptor desc;
     EXPECT_EQ(desc.commandBuffer, VK_NULL_HANDLE);
     EXPECT_EQ(desc.waitSemaphore, VK_NULL_HANDLE);
     EXPECT_EQ(desc.waitStageMask, VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT);

@@ -6,7 +6,7 @@
 #include <optional>
 #include <cstdint>
 
-namespace Khepri {
+namespace khepri {
 
 struct QueueFamilyIndices {
     std::optional<uint32_t> graphicsFamily;
@@ -80,4 +80,4 @@ private:
     std::vector<VkExtensionProperties> m_availableExtensions;
 };
 
-} // namespace Khepri
+} // namespace khepri

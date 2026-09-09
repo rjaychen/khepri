@@ -15,16 +15,6 @@ Swapchain::Swapchain(VulkanContext& context, uint32_t width, uint32_t height)
 
 Swapchain::~Swapchain() {
     Cleanup();
-    if (m_spareSemaphore) vkDestroySemaphore(m_context.GetDevice(), m_spareSemaphore, nullptr);
-    for (size_t i = 0; i < m_imageAvailableSemaphores.size(); i++) {
-        vkDestroySemaphore(m_context.GetDevice(), m_imageAvailableSemaphores[i], nullptr);
-    }
-    for (size_t i = 0; i < m_renderFinishedSemaphores.size(); i++) {
-        vkDestroySemaphore(m_context.GetDevice(), m_renderFinishedSemaphores[i], nullptr);
-    }
-    for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
-        vkDestroyFence(m_context.GetDevice(), m_inFlightFences[i], nullptr);
-    }
 }
 
 void Swapchain::Cleanup() {
@@ -202,43 +192,28 @@ void Swapchain::CreateDepthResources() {
 }
 
 void Swapchain::CreateSyncObjects() {
-    // imageAvailableSemaphores & renderFinishedSemaphores: one per swapchain image.
-    // Indexing both by imageIndex guarantees semaphores are never reused while presentation of that image is pending.
-    m_imageAvailableSemaphores.resize(m_images.size());
-    m_renderFinishedSemaphores.resize(m_images.size());
-    m_inFlightFences.resize(MAX_FRAMES_IN_FLIGHT);
+    m_imageAvailableSemaphores.clear();
+    m_renderFinishedSemaphores.clear();
+    m_inFlightFences.clear();
 
-    VkSemaphoreCreateInfo semaphoreInfo{};
-    semaphoreInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
-
-    VkFenceCreateInfo fenceInfo{};
-    fenceInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
-    fenceInfo.flags = VK_FENCE_CREATE_SIGNALED_BIT;
-
-    if (vkCreateSemaphore(m_context.GetDevice(), &semaphoreInfo, nullptr, &m_spareSemaphore) != VK_SUCCESS) {
-        throw std::runtime_error("Failed to create spare semaphore!");
-    }
+    m_spareSemaphore = khepri::VulkanSemaphore(m_context.GetDevice());
     for (size_t i = 0; i < m_images.size(); i++) {
-        if (vkCreateSemaphore(m_context.GetDevice(), &semaphoreInfo, nullptr, &m_imageAvailableSemaphores[i]) != VK_SUCCESS ||
-            vkCreateSemaphore(m_context.GetDevice(), &semaphoreInfo, nullptr, &m_renderFinishedSemaphores[i]) != VK_SUCCESS) {
-            throw std::runtime_error("Failed to create per-image semaphores!");
-        }
+        m_imageAvailableSemaphores.emplace_back(m_context.GetDevice());
+        m_renderFinishedSemaphores.emplace_back(m_context.GetDevice());
     }
     for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
-        if (vkCreateFence(m_context.GetDevice(), &fenceInfo, nullptr, &m_inFlightFences[i]) != VK_SUCCESS) {
-            throw std::runtime_error("Failed to create fence!");
-        }
+        m_inFlightFences.emplace_back(m_context.GetDevice(), VK_FENCE_CREATE_SIGNALED_BIT);
     }
 }
 
 VkResult Swapchain::AcquireNextImage(uint32_t* imageIndex) {
-    vkWaitForFences(m_context.GetDevice(), 1, &m_inFlightFences[m_currentFrame], VK_TRUE, UINT64_MAX);
-    vkResetFences(m_context.GetDevice(), 1, &m_inFlightFences[m_currentFrame]);
+    m_inFlightFences[m_currentFrame].Wait();
+    m_inFlightFences[m_currentFrame].Reset();
 
     // Signal m_spareSemaphore (always unsignaled at this point).
     VkResult result = vkAcquireNextImageKHR(
         m_context.GetDevice(), m_swapchain, UINT64_MAX,
-        m_spareSemaphore, VK_NULL_HANDLE, imageIndex
+        m_spareSemaphore.GetHandle(), VK_NULL_HANDLE, imageIndex
     );
 
     if (result == VK_SUCCESS || result == VK_SUBOPTIMAL_KHR) {
@@ -255,7 +230,7 @@ VkResult Swapchain::Present(uint32_t imageIndex) {
     VkPresentInfoKHR presentInfo{};
     presentInfo.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
 
-    VkSemaphore signalSemaphores[] = { m_renderFinishedSemaphores[imageIndex] };
+    VkSemaphore signalSemaphores[] = { m_renderFinishedSemaphores[imageIndex].GetHandle() };
     presentInfo.waitSemaphoreCount = 1;
     presentInfo.pWaitSemaphores = signalSemaphores;
 
