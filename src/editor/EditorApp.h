@@ -20,6 +20,8 @@
 #include "NodeGraphEditorPanel.h"
 #include "AssetManagerPanel.h"
 #include "OracleBridge.h"
+#include "Theme.h"
+#include "ThumbnailCache.h"
 #include "../core/UndoStack.h"
 
 #include <imgui.h>
@@ -101,6 +103,11 @@ private:
     std::unique_ptr<VulkanInspectorPanel> m_vulkanInspectorPanel;
     std::unique_ptr<khepri::NodeGraphEditorPanel> m_nodeGraphEditorPanel;
     std::unique_ptr<khepri::AssetManagerPanel> m_assetManagerPanel;
+    std::unique_ptr<khepri::ui::ThumbnailCache> m_thumbnailCache;
+
+    // UI & DPI Scale
+    float m_uiScale = 1.0f;
+    float m_pendingFontScale = 0.0f;
 
     // Window Visibility Toggles
     bool m_showViewport = true;

@@ -90,6 +90,30 @@ bool SceneNode::Contains(const SceneNode* target) const noexcept {
     return false;
 }
 
+SceneNode* SceneNode::FindDescendantById(uint32_t searchId) noexcept {
+    if (id == searchId) return this;
+    for (const auto& child : m_children) {
+        if (child) {
+            if (auto found = child->FindDescendantById(searchId)) {
+                return found;
+            }
+        }
+    }
+    return nullptr;
+}
+
+const SceneNode* SceneNode::FindDescendantById(uint32_t searchId) const noexcept {
+    if (id == searchId) return this;
+    for (const auto& child : m_children) {
+        if (child) {
+            if (auto found = child->FindDescendantById(searchId)) {
+                return found;
+            }
+        }
+    }
+    return nullptr;
+}
+
 void SceneNode::SyncPropertiesToTransform() {
     if (m_properties.size() >= 3) {
         m_properties[0].value = position;
@@ -131,7 +155,7 @@ void SceneNode::EvaluateNodeGraph(bool propagateToChildren) {
 
         // Find terminal geometry output or last produced mesh
         std::shared_ptr<MeshComponent> outMesh = nullptr;
-        for (const auto& [id, gNode] : nodeGraph->GetNodes()) {
+        for (const auto& [graphNodeId, gNode] : nodeGraph->GetNodes()) {
             if (auto m = gNode->GetOutputMesh()) {
                 outMesh = m;
             }

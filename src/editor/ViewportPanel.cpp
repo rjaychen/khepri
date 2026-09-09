@@ -1,4 +1,5 @@
 #include "ViewportPanel.h"
+#include "Theme.h"
 #include "../scene/MeshComponent.h"
 #include "../scene/SceneNode.h"
 #include "../core/Logger.h"
@@ -237,14 +238,14 @@ void ViewportPanel::RenderUI(Camera& camera, VkDescriptorSet& viewportTextureDS,
     ImGui::SameLine();
     ImGui::SetNextItemWidth(120.0f);
     const char* aaOptions[] = { "AA: Off (1x)", "AA: 2x MSAA", "AA: 4x MSAA", "AA: 8x (Best)" };
-    int currentAA = 3;
-    if (m_msaaSamples == VK_SAMPLE_COUNT_1_BIT) currentAA = 0;
+    int currentAA = 2; // Default 4x
+    if (m_msaaSamples <= VK_SAMPLE_COUNT_1_BIT) currentAA = 0;
     else if (m_msaaSamples == VK_SAMPLE_COUNT_2_BIT) currentAA = 1;
     else if (m_msaaSamples == VK_SAMPLE_COUNT_4_BIT) currentAA = 2;
-    else if (m_msaaSamples == VK_SAMPLE_COUNT_8_BIT) currentAA = 3;
+    else currentAA = 3;
 
     if (ImGui::Combo("##AA", &currentAA, aaOptions, IM_ARRAYSIZE(aaOptions))) {
-        VkSampleCountFlagBits newSamples = VK_SAMPLE_COUNT_8_BIT;
+        VkSampleCountFlagBits newSamples = VK_SAMPLE_COUNT_4_BIT;
         if (currentAA == 0) newSamples = VK_SAMPLE_COUNT_1_BIT;
         else if (currentAA == 1) newSamples = VK_SAMPLE_COUNT_2_BIT;
         else if (currentAA == 2) newSamples = VK_SAMPLE_COUNT_4_BIT;
@@ -256,7 +257,7 @@ void ViewportPanel::RenderUI(Camera& camera, VkDescriptorSet& viewportTextureDS,
         SetMSAASamples(newSamples);
     }
     if (ImGui::IsItemHovered()) {
-        ImGui::SetTooltip("Anti-Aliasing Quality\n8x MSAA provides smooth hardware edge anti-aliasing for viewport rendering.");
+        ImGui::SetTooltip("Hardware multi-sample anti-aliasing quality for viewport rendering.");
     }
 
     ImGui::SameLine();
@@ -273,39 +274,47 @@ void ViewportPanel::RenderUI(Camera& camera, VkDescriptorSet& viewportTextureDS,
         ImGui::SetTooltip("Light Helper Visuals (Direction, Spot Cone/FOV, Point Range):\n- Selected: Show helpers for selected light\n- All: Show helpers for all lights\n- Hidden: Hide light helpers");
     }
 
+    float dpiScale = std::max(1.0f, khepri::ui::Theme::GetContentScale());
+
     ImGui::SameLine();
-    ImGui::TextColored(ImVec4(0.5f, 0.9f, 0.5f, 1.0f), "[%ux%u px]", m_width, m_height);
+    if (dpiScale > 1.05f) {
+        ImGui::TextColored(ImVec4(0.5f, 0.9f, 0.5f, 1.0f), "[%ux%u px (%.2fx DPI)]", m_width, m_height, dpiScale);
+    } else {
+        ImGui::TextColored(ImVec4(0.5f, 0.9f, 0.5f, 1.0f), "[%ux%u px]", m_width, m_height);
+    }
     ImGui::EndGroup();
     ImGui::PopStyleVar();
     ImGui::Separator();
 
     ImVec2 viewportSize = ImGui::GetContentRegionAvail();
     if (viewportSize.x > 0.0f && viewportSize.y > 0.0f) {
-        uint32_t targetWidth = static_cast<uint32_t>(viewportSize.x);
-        uint32_t targetHeight = static_cast<uint32_t>(viewportSize.y);
+        float baseW = viewportSize.x * dpiScale;
+        float baseH = viewportSize.y * dpiScale;
+
+        uint32_t targetWidth = static_cast<uint32_t>(std::round(baseW));
+        uint32_t targetHeight = static_cast<uint32_t>(std::round(baseH));
 
         switch (m_resMode) {
             case ResolutionMode::FitPanel:
+            case ResolutionMode::Scale100:
+                targetWidth = static_cast<uint32_t>(std::round(baseW));
+                targetHeight = static_cast<uint32_t>(std::round(baseH));
                 break;
             case ResolutionMode::Scale50:
-                targetWidth = std::max(1u, static_cast<uint32_t>(viewportSize.x * 0.50f));
-                targetHeight = std::max(1u, static_cast<uint32_t>(viewportSize.y * 0.50f));
+                targetWidth = std::max(1u, static_cast<uint32_t>(std::round(baseW * 0.50f)));
+                targetHeight = std::max(1u, static_cast<uint32_t>(std::round(baseH * 0.50f)));
                 break;
             case ResolutionMode::Scale75:
-                targetWidth = std::max(1u, static_cast<uint32_t>(viewportSize.x * 0.75f));
-                targetHeight = std::max(1u, static_cast<uint32_t>(viewportSize.y * 0.75f));
-                break;
-            case ResolutionMode::Scale100:
-                targetWidth = static_cast<uint32_t>(viewportSize.x);
-                targetHeight = static_cast<uint32_t>(viewportSize.y);
+                targetWidth = std::max(1u, static_cast<uint32_t>(std::round(baseW * 0.75f)));
+                targetHeight = std::max(1u, static_cast<uint32_t>(std::round(baseH * 0.75f)));
                 break;
             case ResolutionMode::Scale150:
-                targetWidth = static_cast<uint32_t>(viewportSize.x * 1.50f);
-                targetHeight = static_cast<uint32_t>(viewportSize.y * 1.50f);
+                targetWidth = static_cast<uint32_t>(std::round(baseW * 1.50f));
+                targetHeight = static_cast<uint32_t>(std::round(baseH * 1.50f));
                 break;
             case ResolutionMode::Scale200:
-                targetWidth = static_cast<uint32_t>(viewportSize.x * 2.00f);
-                targetHeight = static_cast<uint32_t>(viewportSize.y * 2.00f);
+                targetWidth = static_cast<uint32_t>(std::round(baseW * 2.00f));
+                targetHeight = static_cast<uint32_t>(std::round(baseH * 2.00f));
                 break;
             case ResolutionMode::Fixed720p:
                 targetWidth = 1280;
@@ -321,14 +330,36 @@ void ViewportPanel::RenderUI(Camera& camera, VkDescriptorSet& viewportTextureDS,
                 break;
         }
 
-        if (targetWidth != m_width || targetHeight != m_height || m_needTextureUpdate) {
-            bool dimsChanged = (targetWidth != m_width || targetHeight != m_height);
+        bool dimsChanged = (targetWidth != m_width || targetHeight != m_height);
+        auto now = std::chrono::steady_clock::now();
+
+        if (dimsChanged) {
+            m_pendingWidth = targetWidth;
+            m_pendingHeight = targetHeight;
+            m_lastResizeRequestTime = now;
+            m_resizePending = true;
+        }
+
+        // Debounce framebuffer recreation:
+        // Execute immediately if first creation (m_colorImage == VK_NULL_HANDLE),
+        // or user is not holding left mouse,
+        // or dimensions have remained stable for >120ms.
+        bool shouldExecuteResize = false;
+        if (m_resizePending) {
+            auto elapsedMs = std::chrono::duration_cast<std::chrono::milliseconds>(now - m_lastResizeRequestTime).count();
+            if (m_colorImage == VK_NULL_HANDLE || !ImGui::IsMouseDown(ImGuiMouseButton_Left) || elapsedMs > 120) {
+                shouldExecuteResize = true;
+                m_resizePending = false;
+            }
+        }
+
+        if (shouldExecuteResize || m_needTextureUpdate) {
             m_needTextureUpdate = false;
             VkDescriptorSet oldDS = viewportTextureDS;
             viewportTextureDS = VK_NULL_HANDLE;
-            if (dimsChanged) {
-                CreateFramebuffer(targetWidth, targetHeight);
-                camera.SetViewportSize(static_cast<float>(targetWidth), static_cast<float>(targetHeight));
+            if (shouldExecuteResize) {
+                CreateFramebuffer(m_pendingWidth, m_pendingHeight);
+                camera.SetViewportSize(static_cast<float>(m_pendingWidth), static_cast<float>(m_pendingHeight));
             }
             if (oldDS != VK_NULL_HANDLE) {
                 ImGui_ImplVulkan_RemoveTexture(oldDS);
@@ -404,11 +435,38 @@ void ViewportPanel::RenderUI(Camera& camera, VkDescriptorSet& viewportTextureDS,
         }
     }
 
-    // Light icon viewport click selection
+    ImGuiIO& io = ImGui::GetIO();
+
+    // Light icon and 3D Mesh viewport click selection via Raycasting
     if ((m_isHovered || m_isFocused) && !ImGui::IsAnyItemActive() && !m_gizmo.IsUsing() && !m_gizmo.IsHovered()) {
-        if (ImGui::IsMouseClicked(ImGuiMouseButton_Left) && m_hoveredLightNode) {
-            if (m_onSelectNode) {
-                m_onSelectNode(const_cast<SceneNode*>(m_hoveredLightNode));
+        if (ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
+            m_clickStartPos = io.MousePos;
+            m_isPotentialClick = true;
+        }
+    }
+
+    if (m_isPotentialClick && ImGui::IsMouseDown(ImGuiMouseButton_Left)) {
+        float dragDist = std::hypot(io.MousePos.x - m_clickStartPos.x, io.MousePos.y - m_clickStartPos.y);
+        if (dragDist > 4.0f) {
+            m_isPotentialClick = false;
+        }
+    }
+
+    if (m_isPotentialClick && ImGui::IsMouseReleased(ImGuiMouseButton_Left)) {
+        m_isPotentialClick = false;
+        if ((m_isHovered || m_isFocused) && !ImGui::IsAnyItemActive() && !m_gizmo.IsUsing() && !m_gizmo.IsHovered() && !m_viewCube.IsHovered()) {
+            if (m_hoveredLightNode) {
+                if (m_onSelectNode) {
+                    m_onSelectNode(const_cast<SceneNode*>(m_hoveredLightNode));
+                }
+            } else {
+                glm::vec2 mousePos(m_clickStartPos.x, m_clickStartPos.y);
+                glm::vec2 vpPos(canvasMin.x, canvasMin.y);
+                glm::vec2 vpSize(canvasActualSize.x, canvasActualSize.y);
+                SceneNode* hitNode = RaycastScene(camera, rootNode, mousePos, vpPos, vpSize);
+                if (m_onSelectNode) {
+                    m_onSelectNode(hitNode);
+                }
             }
         }
     }
@@ -417,7 +475,6 @@ void ViewportPanel::RenderUI(Camera& camera, VkDescriptorSet& viewportTextureDS,
     bool lmbDown = ImGui::IsMouseDown(ImGuiMouseButton_Left);
     bool mmbDown = ImGui::IsMouseDown(ImGuiMouseButton_Middle);
     bool gizmoInterceptingMouse = m_gizmo.IsUsing() || m_gizmo.IsHovered() || m_viewCube.IsHovered() || (m_hoveredLightNode != nullptr);
-    ImGuiIO& io = ImGui::GetIO();
 
     if ((m_isHovered || m_isFocused) && !ImGui::IsAnyItemActive() && !gizmoInterceptingMouse) {
         if (rmbDown && lmbDown) {
@@ -540,3 +597,117 @@ void ViewportPanel::TransitionToShaderRead(VkCommandBuffer cmd) {
 
     vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0, 0, nullptr, 0, nullptr, 1, &barrier);
 }
+
+SceneNode* ViewportPanel::RaycastScene(
+    const Camera& camera,
+    const SceneNode* rootNode,
+    const glm::vec2& mousePos,
+    const glm::vec2& viewportPos,
+    const glm::vec2& viewportSize
+) {
+    if (!rootNode || viewportSize.x <= 0.0f || viewportSize.y <= 0.0f) {
+        return nullptr;
+    }
+
+    glm::mat4 viewProj = camera.GetViewProjectionMatrix();
+    glm::mat4 viewProjInv = glm::inverse(viewProj);
+    khepri::Ray ray = khepri::TransformGizmo::ScreenToRay(mousePos, viewportPos, viewportSize, viewProjInv);
+
+    if (glm::length(ray.direction) < 1e-4f) {
+        return nullptr;
+    }
+
+    SceneNode* closestNode = nullptr;
+    float closestDist = std::numeric_limits<float>::max();
+
+    auto traverse = [&](auto& self, const SceneNode* node) -> void {
+        if (!node || !node->visible) return;
+
+        if (node->mesh) {
+            glm::mat4 worldMat = node->GetWorldTransform();
+            glm::mat4 invWorld = glm::inverse(worldMat);
+
+            glm::vec3 localOrigin = glm::vec3(invWorld * glm::vec4(ray.origin, 1.0f));
+            glm::vec3 localDir = glm::normalize(glm::vec3(invWorld * glm::vec4(ray.direction, 0.0f)));
+
+            glm::vec3 boxMin, boxMax;
+            node->mesh->GetBoundingBox(boxMin, boxMax);
+
+            // Expand thin/flat AABBs (e.g. 2D Planes/quads) so picking isn't mathematically zero-thickness
+            constexpr float kMinThickness = 0.05f;
+            for (int a = 0; a < 3; ++a) {
+                if (boxMax[a] - boxMin[a] < kMinThickness) {
+                    float mid = (boxMin[a] + boxMax[a]) * 0.5f;
+                    boxMin[a] = mid - kMinThickness * 0.5f;
+                    boxMax[a] = mid + kMinThickness * 0.5f;
+                }
+            }
+
+            // Ray-AABB Slab intersection test in local coordinate space
+            float tNear = 0.0f;
+            float tFar = std::numeric_limits<float>::max();
+            bool hit = true;
+
+            for (int a = 0; a < 3; ++a) {
+                if (std::abs(localDir[a]) < 1e-7f) {
+                    if (localOrigin[a] < boxMin[a] || localOrigin[a] > boxMax[a]) {
+                        hit = false;
+                        break;
+                    }
+                } else {
+                    float invD = 1.0f / localDir[a];
+                    float t0 = (boxMin[a] - localOrigin[a]) * invD;
+                    float t1 = (boxMax[a] - localOrigin[a]) * invD;
+                    if (t0 > t1) std::swap(t0, t1);
+                    tNear = std::max(tNear, t0);
+                    tFar = std::min(tFar, t1);
+                    if (tNear > tFar) {
+                        hit = false;
+                        break;
+                    }
+                }
+            }
+
+            if (hit && tFar > 0.0f) {
+                float tHit = (tNear > 0.0f) ? tNear : tFar;
+                glm::vec3 worldHit = glm::vec3(worldMat * glm::vec4(localOrigin + localDir * tHit, 1.0f));
+                float worldDist = glm::distance(ray.origin, worldHit);
+                if (worldDist < closestDist) {
+                    closestDist = worldDist;
+                    closestNode = const_cast<SceneNode*>(node);
+                }
+            }
+        } else if (node->lightComponent) {
+            glm::mat4 worldMat = node->GetWorldTransform();
+            glm::vec3 worldPos = glm::vec3(worldMat[3]);
+
+            glm::vec3 oc = ray.origin - worldPos;
+            float b = glm::dot(oc, ray.direction);
+            float c = glm::dot(oc, oc) - 0.5f * 0.5f;
+            float discriminant = b * b - c;
+            if (discriminant >= 0.0f) {
+                float sqrtD = std::sqrt(discriminant);
+                float t = -b - sqrtD;
+                if (t < 0.0f) t = -b + sqrtD;
+                if (t > 0.0f && t < closestDist) {
+                    closestDist = t;
+                    closestNode = const_cast<SceneNode*>(node);
+                }
+            }
+        }
+
+        for (const auto& child : node->GetChildren()) {
+            self(self, child.get());
+        }
+    };
+
+    for (const auto& child : rootNode->GetChildren()) {
+        traverse(traverse, child.get());
+    }
+    if (!closestNode && rootNode->mesh) {
+        traverse(traverse, rootNode);
+    }
+
+    return closestNode;
+}
+

@@ -109,6 +109,7 @@ private:
 
 #define LOG_INFO(msg) Logger::Get().Log(LogLevel::Info, msg)
 #define LOG_WARN(msg) Logger::Get().Log(LogLevel::Warning, msg)
+#define LOG_WARNING(msg) Logger::Get().Log(LogLevel::Warning, msg)
 #define LOG_ERROR(msg) Logger::Get().Log(LogLevel::Error, msg)
 #define LOG_VULKAN(msg) Logger::Get().Log(LogLevel::VulkanDebug, msg)
 

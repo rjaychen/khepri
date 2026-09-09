@@ -210,6 +210,17 @@ void EditorApp::RenderMainMenuBar(ImGuiID dockspaceID) {
             if (ImGui::MenuItem("Reset Layout")) {
                 m_rebuildLayout = true;
             }
+            if (ImGui::BeginMenu("UI Scale / Zoom")) {
+                auto applyScale = [this](float s) {
+                    m_pendingFontScale = s;
+                };
+                if (ImGui::MenuItem("100% (Normal)", nullptr, m_uiScale == 1.0f))  applyScale(1.0f);
+                if (ImGui::MenuItem("125% (Medium)", nullptr, m_uiScale == 1.25f)) applyScale(1.25f);
+                if (ImGui::MenuItem("150% (Large)",  nullptr, m_uiScale == 1.5f))  applyScale(1.5f);
+                if (ImGui::MenuItem("175% (X-Large)",nullptr, m_uiScale == 1.75f)) applyScale(1.75f);
+                if (ImGui::MenuItem("200% (2x HiDPI)",nullptr, m_uiScale == 2.0f)) applyScale(2.0f);
+                ImGui::EndMenu();
+            }
             if (ImGui::BeginMenu("Set Application Resolution")) {
                 if (ImGui::MenuItem("1280 x 720 (720p HD)")) {
                     glfwSetWindowSize(m_window.GetNativeWindow(), 1280, 720);
@@ -395,11 +406,12 @@ EditorApp::EditorApp()
     m_timelinePanel = std::make_unique<TimelinePanel>();
     m_vulkanInspectorPanel = std::make_unique<VulkanInspectorPanel>(*m_context);
 
-    // Initialize AssetManager & Node Graph Engine
+    // Initialize AssetManager, Thumbnail Cache & Node Graph Engine
     khepri::AssetManager::Instance().Initialize(*m_context);
+    m_thumbnailCache = std::make_unique<khepri::ui::ThumbnailCache>(m_context.get());
     m_nodeGraphEditorPanel = std::make_unique<khepri::NodeGraphEditorPanel>(*m_context);
     m_nodeGraphEditorPanel->SetUndoStack(&m_undoStack);
-    m_assetManagerPanel = std::make_unique<khepri::AssetManagerPanel>();
+    m_assetManagerPanel = std::make_unique<khepri::AssetManagerPanel>(m_thumbnailCache.get());
 
     // Connect Asset & Viewport callbacks
     m_assetManagerPanel->SetOpenModelCallback([this](const std::string& path) {
@@ -421,6 +433,9 @@ EditorApp::EditorApp()
     });
     m_sceneTreePanel->SetOpenModelCallback([this](const std::string& path) {
         OpenSceneModel(path);
+    });
+    m_sceneTreePanel->SetFocusCameraCallback([this](const glm::vec3& targetPos) {
+        m_camera.FocusOnTarget(targetPos, 4.0f);
     });
 
     // Centralized Undo/Redo state observer
@@ -506,7 +521,15 @@ void EditorApp::InitImGui() {
     ImGuiIO& io = ImGui::GetIO();
     io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
 
-    ImGui::StyleColorsDark();
+    // Detect OS DPI Content Scale
+    float xscale = 1.0f, yscale = 1.0f;
+    glfwGetWindowContentScale(m_window.GetNativeWindow(), &xscale, &yscale);
+    khepri::ui::Theme::SetContentScale(xscale);
+    khepri::ui::Theme::SetUserScale(m_uiScale);
+
+    // Load Typography & Apply Design System Theme
+    khepri::ui::Theme::LoadFonts(io, khepri::ui::Theme::GetTotalScale(), "assets/fonts");
+    khepri::ui::Theme::ApplyTheme(khepri::ui::Theme::GetTotalScale());
 
     ImGui_ImplGlfw_InitForVulkan(m_window.GetNativeWindow(), true);
 
@@ -686,9 +709,9 @@ void EditorApp::BuildSampleScene() {
     // Add default Sun / Directional light node (Unreal ALight/ADirectionalLight style)
     m_rootNode->AddChild(std::make_unique<DirectionalLightNode>("Sun / Main Light", glm::vec3(2.0f, 2.0f, 2.0f), glm::vec3(-45.0f, 45.0f, 0.0f)));
 
-    // Default object in scene is now a Cylinder so it's not a cube!
-    auto demoNode = std::make_unique<SceneNode>("Demo Cylinder");
-    demoNode->mesh = MeshComponent::CreateCylinder(*m_context, 0.5f, 1.2f, 32);
+    // Initialize Default object in scene
+    auto demoNode = std::make_unique<SceneNode>("Demo Cube");
+    demoNode->mesh = MeshComponent::CreateCube(*m_context, 1.0f);
     SceneNode* demoPtr = m_rootNode->AddChild(std::move(demoNode));
 
     if (m_nodeGraphEditorPanel) {
@@ -963,6 +986,17 @@ void EditorApp::Run() {
             continue;
         }
 
+        // Handle deferred typography / UI scale changes at safe point between frames
+        if (m_pendingFontScale > 0.0f) {
+            m_context->WaitIdle();
+            m_uiScale = m_pendingFontScale;
+            khepri::ui::Theme::SetUserScale(m_uiScale);
+            ImGuiIO& io = ImGui::GetIO();
+            khepri::ui::Theme::LoadFonts(io, khepri::ui::Theme::GetTotalScale(), "assets/fonts");
+            khepri::ui::Theme::ApplyTheme(khepri::ui::Theme::GetTotalScale());
+            m_pendingFontScale = 0.0f;
+        }
+
         // Start ImGui Frame
         ImGui_ImplVulkan_NewFrame();
         ImGui_ImplGlfw_NewFrame();
@@ -1014,7 +1048,7 @@ void EditorApp::Run() {
             RenderEngineLogConsole(&m_showLogConsole);
         }
 
-        // Global Keyboard Shortcuts (Undo: Ctrl+Z, Redo: Ctrl+Y / Ctrl+Shift+Z, Fullscreen: F11 / Alt+Enter)
+        // Global Keyboard Shortcuts (Undo: Ctrl+Z, Redo: Ctrl+Y / Ctrl+Shift+Z, Fullscreen: F11 / Alt+Enter, Focus: F, Rename: F2)
         ImGuiIO& io = ImGui::GetIO();
         if (!io.WantTextInput) {
             if (ImGui::IsKeyPressed(ImGuiKey_F11, false) ||
@@ -1028,6 +1062,14 @@ void EditorApp::Run() {
                        (io.KeyCtrl && io.KeyShift && ImGui::IsKeyPressed(ImGuiKey_Z, false))) {
                 if (m_undoStack.CanRedo()) {
                     m_undoStack.Redo();
+                }
+            } else if (ImGui::IsKeyPressed(ImGuiKey_F, false)) {
+                if (m_sceneTreePanel && m_sceneTreePanel->GetSelectedNode()) {
+                    m_camera.FocusOnTarget(m_sceneTreePanel->GetSelectedNode()->position, 4.0f);
+                }
+            } else if (ImGui::IsKeyPressed(ImGuiKey_F2, false)) {
+                if (m_sceneTreePanel && m_sceneTreePanel->GetSelectedNode()) {
+                    m_sceneTreePanel->StartRenaming(m_sceneTreePanel->GetSelectedNode());
                 }
             }
         }

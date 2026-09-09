@@ -1,0 +1,7 @@
+{
+  "name": "Copper",
+  "baseColor": [0.955, 0.637, 0.538, 1.0],
+  "roughness": 0.22,
+  "metallic": 0.98,
+  "emissive": [0.0, 0.0, 0.0, 1.0]
+}
