@@ -13,14 +13,17 @@
 
 TEST(SceneHierarchyTest, NodeNameInheritsFileStemOnImport) {
     VulkanContext* nullContext = nullptr;
-    const std::string testPath = "assets/models/bunny.obj";
+    std::string testPath = "assets/models/Box.gltf";
+    if (!std::filesystem::exists(testPath) && std::filesystem::exists("../" + testPath)) {
+        testPath = "../" + testPath;
+    }
 
     auto sceneRoot = std::make_shared<SceneNode>("Scene Root");
     auto loadedNodeResult = ModelImporter::LoadFromFile(*nullContext, testPath);
     ASSERT_TRUE(loadedNodeResult.has_value());
     auto loadedNode = loadedNodeResult.value();
 
-    std::string stemName = std::filesystem::path(testPath).stem().string(); // "bunny"
+    std::string stemName = std::filesystem::path(testPath).stem().string(); // "Box"
     const auto& loadedChildren = loadedNode->GetChildren();
     if (!loadedChildren.empty()) {
         for (const auto& child : loadedChildren) {
@@ -30,11 +33,15 @@ TEST(SceneHierarchyTest, NodeNameInheritsFileStemOnImport) {
                 sceneRoot->AddChild(std::move(importedChild));
             }
         }
+    } else if (loadedNode->mesh) {
+        auto importedChild = std::make_unique<SceneNode>(stemName);
+        importedChild->mesh = loadedNode->mesh;
+        sceneRoot->AddChild(std::move(importedChild));
     }
 
     const auto& sceneChildren = sceneRoot->GetChildren();
     ASSERT_FALSE(sceneChildren.empty());
-    EXPECT_EQ(sceneChildren[0]->name, "bunny");
+    EXPECT_EQ(sceneChildren[0]->name, "Box");
 }
 
 TEST(SceneHierarchyTest, VisibilityTogglePreservesMeshGeometry) {

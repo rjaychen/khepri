@@ -8,7 +8,7 @@ class VulkanInspectorPanel {
 public:
     VulkanInspectorPanel(VulkanContext& context);
 
-    void RenderUI(const Swapchain& swapchain);
+    void RenderUI(Swapchain& swapchain);
 
 private:
     VulkanContext& m_context;

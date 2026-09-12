@@ -20,6 +20,7 @@ public:
     PipelineBuilder& SetMultisamplingNone();
     PipelineBuilder& SetMultisampling(VkSampleCountFlagBits samples, bool sampleShading = false);
     PipelineBuilder& DisableBlending();
+    PipelineBuilder& EnableAlphaBlending();
     PipelineBuilder& SetColorAttachmentFormat(VkFormat format);
     PipelineBuilder& SetDepthFormat(VkFormat format);
     PipelineBuilder& EnableDepthTest(bool depthWriteEnable, VkCompareOp op);

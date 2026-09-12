@@ -17,6 +17,12 @@ class Swapchain {
 public:
     static constexpr int MAX_FRAMES_IN_FLIGHT = 2;
 
+    /// Controls the Vulkan swapchain present mode.
+    /// Mailbox  — triple-buffered, lowest latency, no tearing (default).
+    /// Immediate — uncapped throughput, possible tearing, lowest latency.
+    /// VSync    — FIFO, capped at monitor refresh rate, no tearing, adds up to 1 frame latency.
+    enum class PresentMode { Mailbox, Immediate, VSync };
+
     Swapchain(VulkanContext& context, uint32_t width, uint32_t height);
     ~Swapchain();
 
@@ -24,6 +30,15 @@ public:
     Swapchain& operator=(const Swapchain&) = delete;
 
     void Recreate(uint32_t width, uint32_t height);
+
+    /// Request a present mode change. Takes effect on the next Recreate() call,
+    /// which is triggered automatically if m_pendingPresentModeChange is set.
+    void SetPresentMode(PresentMode mode);
+    [[nodiscard]] PresentMode GetPresentMode() const noexcept { return m_presentMode; }
+    /// Returns true if a present mode change is pending and the swapchain needs recreation.
+    [[nodiscard]] bool HasPendingPresentModeChange() const noexcept { return m_pendingPresentModeChange; }
+    /// Apply pending present mode change. Call from the main loop at a safe point (after fence wait).
+    void ApplyPendingPresentModeChange();
 
     VkSwapchainKHR GetSwapchain() const { return m_swapchain; }
     VkFormat GetImageFormat() const { return m_imageFormat; }
@@ -78,4 +93,7 @@ private:
     std::vector<khepri::VulkanSemaphore> m_renderFinishedSemaphores;
     std::vector<khepri::VulkanFence> m_inFlightFences;
     uint32_t m_currentFrame = 0;
+
+    PresentMode m_presentMode = PresentMode::Mailbox;
+    bool m_pendingPresentModeChange = false;
 };

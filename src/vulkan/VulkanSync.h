@@ -128,7 +128,7 @@ public:
         return vkWaitForFences(m_device, 1, &m_handle, VK_TRUE, timeoutNanoseconds);
     }
 
-    VkResult Reset() const {
+    VkResult Reset() {
         if (m_handle == VK_NULL_HANDLE || m_device == VK_NULL_HANDLE) {
             throw std::runtime_error("Attempted to reset invalid VulkanFence");
         }

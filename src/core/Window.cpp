@@ -22,6 +22,9 @@ Window::Window(int width, int height, const std::string& title)
     glfwSetWindowUserPointer(m_window, this);
     glfwSetFramebufferSizeCallback(m_window, FramebufferResizeCallback);
 
+    // Explicitly disable any GLFW windowing-layer VSync override.
+    glfwSwapInterval(0);
+
     LOG_INFO("GLFW Window created successfully (" + std::to_string(width) + "x" + std::to_string(height) + ")");
 }
 
@@ -114,6 +117,24 @@ void Window::SetTitle(const std::string& title) {
     m_title = title;
     if (m_window) {
         glfwSetWindowTitle(m_window, m_title.c_str());
+    }
+}
+
+void Window::SetCursorLocked(bool locked) {
+    if (!m_window || m_cursorLocked == locked) return;
+    m_cursorLocked = locked;
+
+    if (locked) {
+        glfwSetInputMode(m_window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
+        // Enable raw (unaccelerated) mouse motion if the platform supports it
+        if (glfwRawMouseMotionSupported()) {
+            glfwSetInputMode(m_window, GLFW_RAW_MOUSE_MOTION, GLFW_TRUE);
+        }
+    } else {
+        if (glfwRawMouseMotionSupported()) {
+            glfwSetInputMode(m_window, GLFW_RAW_MOUSE_MOTION, GLFW_FALSE);
+        }
+        glfwSetInputMode(m_window, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
     }
 }
 

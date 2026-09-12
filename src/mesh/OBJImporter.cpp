@@ -15,7 +15,7 @@ bool OBJImporter::CanImport(const std::string& filepath) const {
 }
 
 std::expected<std::shared_ptr<SceneNode>, khepri::ImportError> OBJImporter::Import(VulkanContext& context, const std::string& filepath,
-                                                VkDescriptorSetLayout, DescriptorAllocator*, VkBuffer) {
+                                                VkDescriptorSetLayout, DescriptorAllocator*) {
     LOG_INFO("Loading Wavefront OBJ model via OBJImporter: " + filepath);
 
     std::string resolvedPath = filepath;
