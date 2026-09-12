@@ -108,6 +108,8 @@ set(SHADER_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/shaders")
 set(SHADER_SOURCES
     ${SHADER_SOURCE_DIR}/mesh.vert
     ${SHADER_SOURCE_DIR}/mesh.frag
+    ${SHADER_SOURCE_DIR}/grid.vert
+    ${SHADER_SOURCE_DIR}/grid.frag
     ${SHADER_SOURCE_DIR}/deform_twist.comp
     ${SHADER_SOURCE_DIR}/deform_wave.comp
 )
@@ -320,6 +322,8 @@ if(BUILD_TESTS)
         src/editor/LightVisualizer.h
         src/editor/SceneTreePanel.cpp
         src/editor/SceneTreePanel.h
+        src/editor/ViewportPanel.cpp
+        src/editor/ViewportPanel.h
     )
 
     add_executable(KhepriEngineTests

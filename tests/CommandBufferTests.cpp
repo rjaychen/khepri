@@ -2,6 +2,7 @@
 #include <volk.h>
 #include "vulkan/CommandBuffer.h"
 #include "vulkan/VulkanSync.h"
+#include "editor/EditorApp.h"
 
 namespace {
 
@@ -54,6 +55,31 @@ TEST(VulkanSyncTest, FenceMoveSemantics) {
     khepri::VulkanFence b(std::move(a));
     EXPECT_FALSE(b.IsValid());
     EXPECT_EQ(b.GetHandle(), VK_NULL_HANDLE);
+}
+
+TEST(DeletionQueueTest, EmptyQueueFlushDoesNotThrow) {
+    DeletionQueue dq;
+    EXPECT_NO_THROW(dq.Flush());
+}
+
+TEST(DeletionQueueTest, FlushExecutesInLIFOOrder) {
+    DeletionQueue dq;
+    std::vector<int> executionLog;
+
+    dq.Push([&executionLog]() { executionLog.push_back(1); });
+    dq.Push([&executionLog]() { executionLog.push_back(2); });
+    dq.Push([&executionLog]() { executionLog.push_back(3); });
+
+    dq.Flush();
+
+    ASSERT_EQ(executionLog.size(), 3u);
+    EXPECT_EQ(executionLog[0], 3);
+    EXPECT_EQ(executionLog[1], 2);
+    EXPECT_EQ(executionLog[2], 1);
+
+    // Second flush should be empty (no-op)
+    dq.Flush();
+    EXPECT_EQ(executionLog.size(), 3u);
 }
 
 } // namespace

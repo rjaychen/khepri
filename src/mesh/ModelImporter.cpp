@@ -27,7 +27,7 @@ const std::vector<ModelImporter::ImporterRegistryEntry>& ModelImporter::GetRegis
 
 std::expected<std::shared_ptr<SceneNode>, khepri::ImportError> ModelImporter::LoadFromFile(
     VulkanContext& context, const std::string& filepath,
-    VkDescriptorSetLayout setLayout, DescriptorAllocator* allocator, VkBuffer lightUBOBuffer) {
+    VkDescriptorSetLayout setLayout, DescriptorAllocator* allocator) {
 
     // Resolve path check (handling relative search fallbacks)
     std::string resolvedPath = filepath;
@@ -61,7 +61,7 @@ std::expected<std::shared_ptr<SceneNode>, khepri::ImportError> ModelImporter::Lo
             if (sExt == ext) {
                 auto importer = entry.factory();
                 if (importer && importer->CanImport(resolvedPath)) {
-                    return importer->Import(context, resolvedPath, setLayout, allocator, lightUBOBuffer);
+                    return importer->Import(context, resolvedPath, setLayout, allocator);
                 }
             }
         }

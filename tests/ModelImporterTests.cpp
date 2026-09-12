@@ -155,7 +155,7 @@ TEST_F(ModelImporterTest, DataDrivenRegistryAndCustomRegistration) {
             return path.ends_with(".custom");
         }
         [[nodiscard]] std::expected<std::shared_ptr<SceneNode>, khepri::ImportError> Import(
-            VulkanContext&, const std::string&, VkDescriptorSetLayout, DescriptorAllocator*, VkBuffer) override {
+            VulkanContext&, const std::string&, VkDescriptorSetLayout, DescriptorAllocator*) override {
             return std::make_shared<SceneNode>("MockCustomNode");
         }
     };

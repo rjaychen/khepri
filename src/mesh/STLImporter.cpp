@@ -13,7 +13,7 @@ bool STLImporter::CanImport(const std::string& filepath) const {
 }
 
 std::expected<std::shared_ptr<SceneNode>, khepri::ImportError> STLImporter::Import(VulkanContext& context, const std::string& filepath,
-                                                VkDescriptorSetLayout, DescriptorAllocator*, VkBuffer) {
+                                                VkDescriptorSetLayout, DescriptorAllocator*) {
     LOG_INFO("Loading STL model via STLImporter: " + filepath);
     std::ifstream file(filepath, std::ios::binary);
     if (!file.is_open()) {

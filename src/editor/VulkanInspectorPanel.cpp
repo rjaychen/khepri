@@ -1,10 +1,9 @@
 #include "VulkanInspectorPanel.h"
-#include "../core/Logger.h"
 
 VulkanInspectorPanel::VulkanInspectorPanel(VulkanContext& context)
     : m_context(context) {}
 
-void VulkanInspectorPanel::RenderUI(const Swapchain& swapchain) {
+void VulkanInspectorPanel::RenderUI(Swapchain& swapchain) {
     ImGui::Begin("Vulkan Educational Inspector");
 
     if (ImGui::CollapsingHeader("Physical Device & Driver", ImGuiTreeNodeFlags_DefaultOpen)) {
@@ -46,23 +45,24 @@ void VulkanInspectorPanel::RenderUI(const Swapchain& swapchain) {
         ImGui::Text("Depth Format: VK_FORMAT_D32_SFLOAT");
         ImGui::Text("Max Frames In Flight: %d", Swapchain::MAX_FRAMES_IN_FLIGHT);
         ImGui::Text("Rendering Pipeline: Vulkan 1.3 Dynamic Rendering (vkCmdBeginRendering)");
-    }
 
-    if (ImGui::CollapsingHeader("Engine Logs", ImGuiTreeNodeFlags_DefaultOpen)) {
-        if (ImGui::Button("Clear Logs")) Logger::Get().ClearLogs();
-        ImGui::BeginChild("LogRegion", ImVec2(0, 200), true);
-        for (const auto& log : Logger::Get().GetLogs()) {
-            ImVec4 col = ImVec4(1, 1, 1, 1);
-            if (log.level == LogLevel::Error) col = ImVec4(1, 0.3f, 0.3f, 1);
-            else if (log.level == LogLevel::Warning) col = ImVec4(1, 0.8f, 0.2f, 1);
-            else if (log.level == LogLevel::VulkanDebug) col = ImVec4(0.4f, 0.8f, 1.0f, 1);
+        ImGui::Separator();
 
-            ImGui::TextColored(col, "[%s] %s", log.timestamp.c_str(), log.message.c_str());
+        // Present Mode selector — changes take effect on next frame (safe swapchain recreate)
+        const char* presentModes[] = {
+            "Mailbox",
+            "Immediate",
+            "FIFO"
+        };
+        int currentMode = static_cast<int>(swapchain.GetPresentMode());
+        ImGui::SetNextItemWidth(320.0f);
+        if (ImGui::Combo("Present Mode", &currentMode, presentModes, IM_ARRAYSIZE(presentModes))) {
+            swapchain.SetPresentMode(static_cast<Swapchain::PresentMode>(currentMode));
         }
-        if (ImGui::GetScrollY() >= ImGui::GetScrollMaxY()) {
-            ImGui::SetScrollHereY(1.0f);
+        if (swapchain.HasPendingPresentModeChange()) {
+            ImGui::SameLine();
+            ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.2f, 1.0f), "(applying...)");
         }
-        ImGui::EndChild();
     }
 
     ImGui::End();

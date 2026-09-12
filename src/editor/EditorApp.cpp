@@ -46,8 +46,7 @@ void EditorApp::OpenSceneModel(const std::string& path) {
     if (m_sceneTreePanel) {
         m_sceneTreePanel->ClearSelectedNode();
     }
-    VkBuffer lightBuf = m_lightUBOBuffer ? m_lightUBOBuffer->GetBuffer() : VK_NULL_HANDLE;
-    auto loadedNodeResult = ModelImporter::LoadFromFile(*m_context, path, m_textureDescriptorSetLayout, m_descriptorAllocator.get(), lightBuf);
+    auto loadedNodeResult = ModelImporter::LoadFromFile(*m_context, path, m_textureDescriptorSetLayout, m_descriptorAllocator.get());
     if (loadedNodeResult.has_value()) {
         m_rootNode = loadedNodeResult.value();
 
@@ -74,8 +73,7 @@ void EditorApp::OpenSceneModel(const std::string& path) {
 
 void EditorApp::ImportModelIntoScene(const std::string& path) {
     m_context->WaitIdle();
-    VkBuffer lightBuf = m_lightUBOBuffer ? m_lightUBOBuffer->GetBuffer() : VK_NULL_HANDLE;
-    auto loadedNodeResult = ModelImporter::LoadFromFile(*m_context, path, m_textureDescriptorSetLayout, m_descriptorAllocator.get(), lightBuf);
+    auto loadedNodeResult = ModelImporter::LoadFromFile(*m_context, path, m_textureDescriptorSetLayout, m_descriptorAllocator.get());
     if (loadedNodeResult.has_value()) {
         auto loadedNode = loadedNodeResult.value();
         if (!m_rootNode) {
@@ -205,6 +203,10 @@ void EditorApp::RenderMainMenuBar(ImGuiID dockspaceID) {
             if (ImGui::MenuItem("Reset Camera View (F)")) {
                 m_camera.FocusOnTarget(glm::vec3(0.0f));
             }
+            bool gridVis = m_viewportPanel ? m_viewportPanel->IsGridVisible() : true;
+            if (ImGui::MenuItem("Show 3D Ground Grid", "G", &gridVis)) {
+                if (m_viewportPanel) m_viewportPanel->SetGridVisible(gridVis);
+            }
             if (ImGui::MenuItem("Toggle Fullscreen", "F11", m_window.IsFullscreen())) {
                 m_window.ToggleFullscreen();
             }
@@ -289,6 +291,7 @@ void EditorApp::RenderMainMenuBar(ImGuiID dockspaceID) {
             ImGui::Text("• Control Scheme: Unreal Engine Flycam (RMB+WASDQE) & MeshLab Trackball");
             ImGui::Text("• Asset Importer: glTF 2.0 (.gltf / .glb)");
             ImGui::Text("• Architecture: Two-Tiered Data-Oriented Index-Based Mesh Topology");
+            ImGui::Text("• Performance: Double-buffered in-flight offscreen targets & zero-copy compute pipelines");
             ImGui::Separator();
             if (ImGui::Button("Close")) {
                 ImGui::CloseCurrentPopup();
@@ -341,7 +344,19 @@ struct PushConstants {
     float ambientStrength = 0.15f;
 };
 
-static std::vector<uint32_t> LoadSPIRV(const std::string& path) {
+struct GridPushConstants {
+    glm::mat4 viewProj;
+    glm::mat4 invViewProj;
+    glm::vec4 cameraPos;
+    glm::vec4 gridParams; // x = cellSize, y = majorStep, z = maxDistance, w = opacity
+};
+
+const std::vector<uint32_t>& EditorApp::GetOrLoadSPIRV(const std::string& path) {
+    auto it = m_spirvCache.find(path);
+    if (it != m_spirvCache.end()) {
+        return it->second;
+    }
+
     std::string filename = path;
     size_t lastSlash = path.find_last_of("/\\");
     if (lastSlash != std::string::npos) {
@@ -368,7 +383,8 @@ static std::vector<uint32_t> LoadSPIRV(const std::string& path) {
                 file.seekg(0);
                 file.read(reinterpret_cast<char*>(buffer.data()), fileSize);
                 LOG_INFO("Successfully loaded shader SPIR-V from: " + candidate);
-                return buffer;
+                m_spirvCache[path] = std::move(buffer);
+                return m_spirvCache[path];
             }
         }
     }
@@ -387,6 +403,7 @@ EditorApp::EditorApp()
     InitImGui();
     InitRenderResources();
     CreateRenderPipeline();
+    CreateGridPipeline();
 
     // Init Viewport & Editor Panels
     m_viewportPanel = std::make_unique<ViewportPanel>(*m_context);
@@ -444,39 +461,46 @@ EditorApp::EditorApp()
         }
     });
 
-    // Register Viewport Texture for ImGui rendering (initial DS creation)
-    m_viewportDS = ImGui_ImplVulkan_AddTexture(
-        m_viewportPanel->GetSampler(),
-        m_viewportPanel->GetColorImageView(),
-        VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
-    );
-
     BuildSampleScene();
 
     LOG_INFO("EditorApp initialization complete.");
 }
 
 EditorApp::~EditorApp() {
-    m_context->WaitIdle();
-
+    if (m_context) {
+        m_context->WaitIdle();
+    }
+    m_sceneTreePanel.reset();
+    m_timelinePanel.reset();
+    m_nodeGraphEditorPanel.reset();
+    m_vulkanInspectorPanel.reset();
+    m_assetManagerPanel.reset();
+    m_viewportPanel.reset();
+    m_rootNode.reset();
+    m_activeDisplayMesh.reset();
     m_defaultWhiteTexture.reset();
 
-    // Clean up the viewport descriptor set
-    if (m_viewportDS != VK_NULL_HANDLE) {
-        ImGui_ImplVulkan_RemoveTexture(m_viewportDS);
-        m_viewportDS = VK_NULL_HANDLE;
+    for (auto& buf : m_lightUBOBuffers) {
+        buf.reset();
     }
 
     ImGui_ImplVulkan_Shutdown();
     ImGui_ImplGlfw_Shutdown();
     ImGui::DestroyContext();
 
-    if (m_textureDescriptorSetLayout) vkDestroyDescriptorSetLayout(m_context->GetDevice(), m_textureDescriptorSetLayout, nullptr);
-    if (m_imguiPool)         vkDestroyDescriptorPool(m_context->GetDevice(), m_imguiPool, nullptr);
-    if (m_commandPool)       vkDestroyCommandPool(m_context->GetDevice(), m_commandPool, nullptr);
-    if (m_graphicsPipeline)  vkDestroyPipeline(m_context->GetDevice(), m_graphicsPipeline, nullptr);
-    if (m_wireframePipeline) vkDestroyPipeline(m_context->GetDevice(), m_wireframePipeline, nullptr);
-    if (m_pipelineLayout)    vkDestroyPipelineLayout(m_context->GetDevice(), m_pipelineLayout, nullptr);
+    if (m_context && m_context->GetDevice() != VK_NULL_HANDLE) {
+        VkDevice device = m_context->GetDevice();
+        for (VkPipeline* p : {&m_gridPipeline, &m_graphicsPipeline, &m_wireframePipeline}) {
+            if (*p != VK_NULL_HANDLE) {
+                vkDestroyPipeline(device, *p, nullptr);
+                *p = VK_NULL_HANDLE;
+            }
+        }
+    }
+
+    m_deletionQueue.Flush();
+    m_descriptorAllocator.reset();
+    m_swapchain.reset();
 }
 
 void EditorApp::InitImGui() {
@@ -501,6 +525,9 @@ void EditorApp::InitImGui() {
     poolInfo.pPoolSizes = poolSizes;
 
     vkCreateDescriptorPool(m_context->GetDevice(), &poolInfo, nullptr, &m_imguiPool);
+    m_deletionQueue.Push([device = m_context->GetDevice(), pool = m_imguiPool]() {
+        vkDestroyDescriptorPool(device, pool, nullptr);
+    });
 
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
@@ -535,8 +562,9 @@ void EditorApp::InitImGui() {
     ImGui_ImplVulkan_Init(&initInfo);
 }
 
-void EditorApp::UpdateLightUBO() {
-    if (!m_lightUBOBuffer || !m_rootNode) return;
+void EditorApp::UpdateLightUBO(uint32_t currentFrame) {
+    uint32_t idx = currentFrame % Swapchain::MAX_FRAMES_IN_FLIGHT;
+    if (!m_lightUBOBuffers[idx] || !m_rootNode) return;
 
     LightUBO ubo{};
     ubo.cameraPos = glm::vec4(m_camera.GetPosition(), 0.0f);
@@ -570,70 +598,125 @@ void EditorApp::UpdateLightUBO() {
         ubo.lights[i] = activeLights[i];
     }
 
-    m_lightUBOBuffer->CopyToBuffer(&ubo, sizeof(LightUBO));
+    m_lightUBOBuffers[idx]->CopyToBuffer(&ubo, sizeof(LightUBO));
 }
 
 void EditorApp::InitRenderResources() {
-    // 1. Texture Descriptor Set Layout
+    // 1. Light Descriptor Set Layout (Set 0)
+    if (!m_lightDescriptorSetLayout) {
+        VkDescriptorSetLayoutBinding lightBinding{};
+        lightBinding.binding = 0;
+        lightBinding.descriptorCount = 1;
+        lightBinding.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+        lightBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+
+        VkDescriptorSetLayoutCreateInfo layoutInfo{};
+        layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+        layoutInfo.bindingCount = 1;
+        layoutInfo.pBindings = &lightBinding;
+
+        const VkResult res = vkCreateDescriptorSetLayout(m_context->GetDevice(), &layoutInfo, nullptr, &m_lightDescriptorSetLayout);
+        CHECK_VK_RESULT(res, "Failed to create light descriptor set layout");
+        m_deletionQueue.Push([device = m_context->GetDevice(), layout = m_lightDescriptorSetLayout]() {
+            vkDestroyDescriptorSetLayout(device, layout, nullptr);
+        });
+    }
+
+    // 2. Texture Descriptor Set Layout (Set 1)
     if (!m_textureDescriptorSetLayout) {
-        std::vector<VkDescriptorSetLayoutBinding> bindings(2);
-        bindings[0].binding = 0;
-        bindings[0].descriptorCount = 1;
-        bindings[0].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-        bindings[0].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+        VkDescriptorSetLayoutBinding texBinding{};
+        texBinding.binding = 0;
+        texBinding.descriptorCount = 1;
+        texBinding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        texBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
 
-        bindings[1].binding = 1;
-        bindings[1].descriptorCount = 1;
-        bindings[1].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-        bindings[1].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+        VkDescriptorSetLayoutCreateInfo layoutInfo{};
+        layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+        layoutInfo.bindingCount = 1;
+        layoutInfo.pBindings = &texBinding;
 
-        VkDescriptorSetLayoutCreateInfo descriptorLayoutInfo{};
-        descriptorLayoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-        descriptorLayoutInfo.bindingCount = static_cast<uint32_t>(bindings.size());
-        descriptorLayoutInfo.pBindings = bindings.data();
-
-        const VkResult res = vkCreateDescriptorSetLayout(m_context->GetDevice(), &descriptorLayoutInfo, nullptr, &m_textureDescriptorSetLayout);
+        const VkResult res = vkCreateDescriptorSetLayout(m_context->GetDevice(), &layoutInfo, nullptr, &m_textureDescriptorSetLayout);
         CHECK_VK_RESULT(res, "Failed to create texture descriptor set layout");
+        m_deletionQueue.Push([device = m_context->GetDevice(), layout = m_textureDescriptorSetLayout]() {
+            vkDestroyDescriptorSetLayout(device, layout, nullptr);
+        });
     }
 
-    // 2. Light UBO Buffer
-    if (!m_lightUBOBuffer) {
-        m_lightUBOBuffer = std::make_unique<Buffer>(
-            *m_context,
-            sizeof(LightUBO),
-            VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
-            VMA_MEMORY_USAGE_AUTO,
-            VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT | VMA_ALLOCATION_CREATE_MAPPED_BIT
-        );
+    // 3. Light UBO Buffers & Descriptor Sets
+    for (uint32_t i = 0; i < Swapchain::MAX_FRAMES_IN_FLIGHT; ++i) {
+        if (!m_lightUBOBuffers[i]) {
+            m_lightUBOBuffers[i] = std::make_unique<Buffer>(
+                *m_context,
+                sizeof(LightUBO),
+                VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
+                VMA_MEMORY_USAGE_AUTO,
+                VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT | VMA_ALLOCATION_CREATE_MAPPED_BIT
+            );
+        }
+        if (m_lightDescriptorSets[i] == VK_NULL_HANDLE) {
+            m_lightDescriptorSets[i] = m_descriptorAllocator->Allocate(m_lightDescriptorSetLayout);
+            DescriptorWriter writer;
+            writer.WriteBuffer(0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, m_lightUBOBuffers[i]->GetBuffer(), sizeof(LightUBO));
+            writer.UpdateSet(*m_context, m_lightDescriptorSets[i]);
+        }
     }
 
-    // 3. Default White Texture
+    // 4. Default White Texture (Set 1)
     if (!m_defaultWhiteTexture) {
-        m_defaultWhiteTexture = Texture::CreateWhiteTexture(*m_context, m_textureDescriptorSetLayout, *m_descriptorAllocator, m_lightUBOBuffer->GetBuffer());
+        m_defaultWhiteTexture = Texture::CreateWhiteTexture(*m_context, m_textureDescriptorSetLayout, *m_descriptorAllocator);
     }
 
-    // 4. Pipeline Layout
+    // 5. Mesh Pipeline Layout (Set 0: Light, Set 1: Texture)
     if (!m_pipelineLayout) {
         VkPushConstantRange pushConstant{};
         pushConstant.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
         pushConstant.offset = 0;
         pushConstant.size = sizeof(PushConstants);
 
+        VkDescriptorSetLayout setLayouts[2] = { m_lightDescriptorSetLayout, m_textureDescriptorSetLayout };
+
         VkPipelineLayoutCreateInfo layoutInfo{};
         layoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-        layoutInfo.setLayoutCount = 1;
-        layoutInfo.pSetLayouts = &m_textureDescriptorSetLayout;
+        layoutInfo.setLayoutCount = 2;
+        layoutInfo.pSetLayouts = setLayouts;
         layoutInfo.pushConstantRangeCount = 1;
         layoutInfo.pPushConstantRanges = &pushConstant;
 
         const VkResult res = vkCreatePipelineLayout(m_context->GetDevice(), &layoutInfo, nullptr, &m_pipelineLayout);
         CHECK_VK_RESULT(res, "Failed to create pipeline layout");
+        m_deletionQueue.Push([device = m_context->GetDevice(), layout = m_pipelineLayout]() {
+            vkDestroyPipelineLayout(device, layout, nullptr);
+        });
     }
 
-    // 5. Command Pool & Command Buffers
+    // 6. Grid Pipeline Layout
+    if (!m_gridPipelineLayout) {
+        VkPushConstantRange gridPushConstant{};
+        gridPushConstant.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
+        gridPushConstant.offset = 0;
+        gridPushConstant.size = sizeof(GridPushConstants);
+
+        VkPipelineLayoutCreateInfo gridLayoutInfo{};
+        gridLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+        gridLayoutInfo.setLayoutCount = 0;
+        gridLayoutInfo.pSetLayouts = nullptr;
+        gridLayoutInfo.pushConstantRangeCount = 1;
+        gridLayoutInfo.pPushConstantRanges = &gridPushConstant;
+
+        const VkResult res = vkCreatePipelineLayout(m_context->GetDevice(), &gridLayoutInfo, nullptr, &m_gridPipelineLayout);
+        CHECK_VK_RESULT(res, "Failed to create grid pipeline layout");
+        m_deletionQueue.Push([device = m_context->GetDevice(), layout = m_gridPipelineLayout]() {
+            vkDestroyPipelineLayout(device, layout, nullptr);
+        });
+    }
+
+    // 7. Command Pool & Command Buffers
     if (!m_commandPool) {
         m_commandPool = m_context->CreateCommandPool(VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT);
         m_commandBuffers = m_context->AllocateCommandBuffers(m_commandPool, Swapchain::MAX_FRAMES_IN_FLIGHT);
+        m_deletionQueue.Push([device = m_context->GetDevice(), pool = m_commandPool]() {
+            vkDestroyCommandPool(device, pool, nullptr);
+        });
     }
 }
 
@@ -648,8 +731,8 @@ void EditorApp::CreateRenderPipeline() {
         m_wireframePipeline = VK_NULL_HANDLE;
     }
 
-    std::vector<uint32_t> vCode = LoadSPIRV("shaders/compiled/mesh.vert.spv");
-    std::vector<uint32_t> fCode = LoadSPIRV("shaders/compiled/mesh.frag.spv");
+    const auto& vCode = GetOrLoadSPIRV("shaders/compiled/mesh.vert.spv");
+    const auto& fCode = GetOrLoadSPIRV("shaders/compiled/mesh.frag.spv");
 
     VkShaderModule vertModule = PipelineBuilder::CreateShaderModule(*m_context, vCode);
     VkShaderModule fragModule = PipelineBuilder::CreateShaderModule(*m_context, fCode);
@@ -660,7 +743,7 @@ void EditorApp::CreateRenderPipeline() {
         { .location = 2, .binding = 0, .format = VK_FORMAT_R32G32_SFLOAT,    .offset = static_cast<uint32_t>(offsetof(Vertex, uv)) }
     };
 
-    const VkSampleCountFlagBits msaaSamples = m_viewportPanel ? m_viewportPanel->GetMSAASamples() : VK_SAMPLE_COUNT_8_BIT;
+    const VkSampleCountFlagBits msaaSamples = m_viewportPanel ? m_viewportPanel->GetMSAASamples() : VK_SAMPLE_COUNT_1_BIT;
     m_currentPipelineMSAASamples = msaaSamples;
 
     PipelineBuilder builder;
@@ -681,15 +764,44 @@ void EditorApp::CreateRenderPipeline() {
     vkDestroyShaderModule(m_context->GetDevice(), fragModule, nullptr);
 }
 
+void EditorApp::CreateGridPipeline() {
+    if (m_gridPipeline != VK_NULL_HANDLE) {
+        vkDestroyPipeline(m_context->GetDevice(), m_gridPipeline, nullptr);
+        m_gridPipeline = VK_NULL_HANDLE;
+    }
+
+    const auto& vCode = GetOrLoadSPIRV("shaders/compiled/grid.vert.spv");
+    const auto& fCode = GetOrLoadSPIRV("shaders/compiled/grid.frag.spv");
+
+    VkShaderModule vertModule = PipelineBuilder::CreateShaderModule(*m_context, vCode);
+    VkShaderModule fragModule = PipelineBuilder::CreateShaderModule(*m_context, fCode);
+
+    const VkSampleCountFlagBits msaaSamples = m_viewportPanel ? m_viewportPanel->GetMSAASamples() : VK_SAMPLE_COUNT_1_BIT;
+
+    PipelineBuilder gridBuilder;
+    gridBuilder.SetShaders(vertModule, fragModule)
+               .SetColorAttachmentFormat(VK_FORMAT_R8G8B8A8_UNORM)
+               .SetDepthFormat(VK_FORMAT_D32_SFLOAT)
+               .SetCullMode(VK_CULL_MODE_NONE, VK_FRONT_FACE_COUNTER_CLOCKWISE)
+               .SetMultisampling(msaaSamples, false)
+               .EnableDepthTest(false, VK_COMPARE_OP_LESS_OR_EQUAL)
+               .EnableAlphaBlending();
+
+    m_gridPipeline = gridBuilder.Build(*m_context, m_gridPipelineLayout);
+
+    vkDestroyShaderModule(m_context->GetDevice(), vertModule, nullptr);
+    vkDestroyShaderModule(m_context->GetDevice(), fragModule, nullptr);
+}
+
 void EditorApp::BuildSampleScene() {
     m_rootNode = std::make_unique<SceneNode>("Scene Root");
 
-    // Add default Sun / Directional light node (Unreal ALight/ADirectionalLight style)
+    // Add default Sun / Directional light node
     m_rootNode->AddChild(std::make_unique<DirectionalLightNode>("Sun / Main Light", glm::vec3(2.0f, 2.0f, 2.0f), glm::vec3(-45.0f, 45.0f, 0.0f)));
 
-    // Default object in scene is now a Cylinder so it's not a cube!
-    auto demoNode = std::make_unique<SceneNode>("Demo Cylinder");
-    demoNode->mesh = MeshComponent::CreateCylinder(*m_context, 0.5f, 1.2f, 32);
+    // Default object in scene is a Demo Cube
+    auto demoNode = std::make_unique<SceneNode>("Demo Cube");
+    demoNode->mesh = MeshComponent::CreateCube(*m_context, 1.0f);
     SceneNode* demoPtr = m_rootNode->AddChild(std::move(demoNode));
 
     if (m_nodeGraphEditorPanel) {
@@ -707,7 +819,7 @@ void EditorApp::BuildSampleScene() {
     clip->duration = 4.0f;
 
     AnimationTrack track;
-    track.targetNodeName = "Demo Cylinder";
+    track.targetNodeName = "Demo Cube";
     track.positionKeys = {
         {0.0f, glm::vec3(0.0f, 0.0f, 0.0f)},
         {2.0f, glm::vec3(0.0f, 1.5f, 0.0f)},
@@ -728,7 +840,7 @@ void EditorApp::BuildSampleScene() {
 // ---------------------------------------------------------------------------
 // Recursive scene graph renderer
 // ---------------------------------------------------------------------------
-void EditorApp::DrawSceneNode(VkCommandBuffer cmd, SceneNode* node, const glm::mat4& parentTransform) {
+void EditorApp::DrawSceneNode(VkCommandBuffer cmd, SceneNode* node, const glm::mat4& parentTransform, uint32_t currentFrame) {
     if (!node) return;
 
     // If this node (or its entire subtree) is invisible, skip it
@@ -747,8 +859,13 @@ void EditorApp::DrawSceneNode(VkCommandBuffer cmd, SceneNode* node, const glm::m
             targetMesh->GetTexture()->GetDescriptorSet() :
             m_defaultWhiteTexture->GetDescriptorSet();
 
+        VkDescriptorSet sets[2] = {
+            m_lightDescriptorSets[currentFrame % Swapchain::MAX_FRAMES_IN_FLIGHT],
+            textureDS
+        };
+
         vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, m_pipelineLayout,
-                                0, 1, &textureDS, 0, nullptr);
+                                0, 2, sets, 0, nullptr);
 
         PushConstants push{};
         push.model = renderTransform;
@@ -785,34 +902,35 @@ void EditorApp::DrawSceneNode(VkCommandBuffer cmd, SceneNode* node, const glm::m
 
     // Recurse into children
     for (const auto& child : node->GetChildren()) {
-        DrawSceneNode(cmd, child.get(), worldTransform);
+        DrawSceneNode(cmd, child.get(), worldTransform, currentFrame);
     }
 }
 
-void EditorApp::RenderViewportOffscreen(VkCommandBuffer cmd) {
-    UpdateLightUBO();
+void EditorApp::RenderViewportOffscreen(VkCommandBuffer cmd, uint32_t currentFrame) {
+    UpdateLightUBO(currentFrame);
     // Guard: don't attempt to render if the framebuffer image view is null
-    if (m_viewportPanel->GetColorImageView() == VK_NULL_HANDLE) return;
+    if (m_viewportPanel->GetColorImageView(currentFrame) == VK_NULL_HANDLE) return;
 
     // Rebuild pipelines if MSAA sample count changed
     if (m_currentPipelineMSAASamples != m_viewportPanel->GetMSAASamples()) {
         m_context->WaitIdle();
         CreateRenderPipeline();
+        CreateGridPipeline();
     }
 
-    m_viewportPanel->TransitionToColorAttachment(cmd);
+    m_viewportPanel->TransitionToColorAttachment(cmd, currentFrame);
 
     VkSampleCountFlagBits msaaSamples = m_viewportPanel->GetMSAASamples();
 
     VkRenderingAttachmentInfo colorAttachment{};
     colorAttachment.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
     if (msaaSamples > VK_SAMPLE_COUNT_1_BIT) {
-        colorAttachment.imageView = m_viewportPanel->GetMSAAColorImageView();
+        colorAttachment.imageView = m_viewportPanel->GetMSAAColorImageView(currentFrame);
         colorAttachment.resolveMode = VK_RESOLVE_MODE_AVERAGE_BIT;
-        colorAttachment.resolveImageView = m_viewportPanel->GetColorImageView();
+        colorAttachment.resolveImageView = m_viewportPanel->GetColorImageView(currentFrame);
         colorAttachment.resolveImageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
     } else {
-        colorAttachment.imageView = m_viewportPanel->GetColorImageView();
+        colorAttachment.imageView = m_viewportPanel->GetColorImageView(currentFrame);
     }
     colorAttachment.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
     colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
@@ -821,7 +939,7 @@ void EditorApp::RenderViewportOffscreen(VkCommandBuffer cmd) {
 
     VkRenderingAttachmentInfo depthAttachment{};
     depthAttachment.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
-    depthAttachment.imageView = (msaaSamples > VK_SAMPLE_COUNT_1_BIT) ? m_viewportPanel->GetMSAADepthImageView() : m_viewportPanel->GetDepthImageView();
+    depthAttachment.imageView = (msaaSamples > VK_SAMPLE_COUNT_1_BIT) ? m_viewportPanel->GetMSAADepthImageView(currentFrame) : m_viewportPanel->GetDepthImageView(currentFrame);
     depthAttachment.imageLayout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL;
     depthAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
     depthAttachment.storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
@@ -851,23 +969,43 @@ void EditorApp::RenderViewportOffscreen(VkCommandBuffer cmd) {
     scissor.extent = { m_viewportPanel->GetWidth(), m_viewportPanel->GetHeight() };
     vkCmdSetScissor(cmd, 0, 1, &scissor);
 
-    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, m_graphicsPipeline);
-
-    // Traverse the entire scene graph — each node renders with its own world transform
+    // 1. Draw Scene Graph Meshes
     if (m_rootNode) {
-        DrawSceneNode(cmd, m_rootNode.get(), glm::mat4(1.0f));
+        DrawSceneNode(cmd, m_rootNode.get(), glm::mat4(1.0f), currentFrame);
+    }
+
+    // 2. Draw 3D Infinite Ground Grid (if enabled)
+    if (m_viewportPanel->IsGridVisible() && m_gridPipeline != VK_NULL_HANDLE) {
+        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, m_gridPipeline);
+
+        GridPushConstants gridPush{};
+        gridPush.viewProj = m_camera.GetViewProjectionMatrix();
+        gridPush.invViewProj = glm::inverse(m_camera.GetViewProjectionMatrix());
+        gridPush.cameraPos = glm::vec4(m_camera.GetPosition(), 1.0f);
+        gridPush.gridParams = glm::vec4(
+            m_viewportPanel->GetGridCellSize(),
+            m_viewportPanel->GetGridMajorStep(),
+            m_viewportPanel->GetGridFadeDistance(),
+            m_viewportPanel->GetGridOpacity()
+        );
+
+        vkCmdPushConstants(cmd, m_gridPipelineLayout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
+                           0, sizeof(GridPushConstants), &gridPush);
+
+        // Draw procedural 6-vertex infinite grid quad without vertex buffers
+        vkCmdDraw(cmd, 6, 1, 0, 0);
     }
 
     vkCmdEndRendering(cmd);
 
-    m_viewportPanel->TransitionToShaderRead(cmd);
+    m_viewportPanel->TransitionToShaderRead(cmd, currentFrame);
 }
 
-void EditorApp::RecordCommandBuffer(VkCommandBuffer cmd, uint32_t imageIndex) {
+void EditorApp::RecordCommandBuffer(VkCommandBuffer cmd, uint32_t imageIndex, uint32_t currentFrame) {
     khepri::ScopedCommandBuffer scopedCmd(cmd);
 
     // 1. Offscreen 3D Viewport Pass
-    RenderViewportOffscreen(cmd);
+    RenderViewportOffscreen(cmd, currentFrame);
 
     // 2. Transition swapchain image: UNDEFINED -> COLOR_ATTACHMENT_OPTIMAL
     {
@@ -931,9 +1069,8 @@ void EditorApp::Run() {
     auto lastTime = std::chrono::high_resolution_clock::now();
 
     while (!m_window.ShouldClose()) {
+        // Check for minimization (0x0 framebuffer) — keep polling so the window stays responsive
         m_window.PollEvents();
-
-        // Check for minimization (0x0 framebuffer)
         int fbWidth = 0, fbHeight = 0;
         m_window.GetFramebufferSize(&fbWidth, &fbHeight);
         if (fbWidth == 0 || fbHeight == 0) {
@@ -943,10 +1080,16 @@ void EditorApp::Run() {
 
         auto currentTime = std::chrono::high_resolution_clock::now();
         float deltaTime = std::chrono::duration<float, std::chrono::seconds::period>(currentTime - lastTime).count();
+        deltaTime = std::clamp(deltaTime, 0.0001f, 0.1f);
         lastTime = currentTime;
 
         // Update Animation System (only ticks when m_timeline.IsPlaying() == true)
         m_timeline.Update(deltaTime, m_rootNode.get());
+
+        if (m_swapchain->HasPendingPresentModeChange()) {
+            m_swapchain->ApplyPendingPresentModeChange();
+            continue;
+        }
 
         // Acquire Swapchain Image
         uint32_t imageIndex;
@@ -961,6 +1104,7 @@ void EditorApp::Run() {
         }
 
         // Start ImGui Frame
+        m_window.PollEvents();
         ImGui_ImplVulkan_NewFrame();
         ImGui_ImplGlfw_NewFrame();
         m_oracleBridge.PollEvents(ImGui::GetIO(), m_window.GetWidth(), m_window.GetHeight());
@@ -976,7 +1120,7 @@ void EditorApp::Run() {
 
         // Render UI panels
         if (m_showViewport && m_viewportPanel) {
-            m_viewportPanel->RenderUI(m_camera, m_viewportDS, deltaTime,
+            m_viewportPanel->RenderUI(m_camera, currentFrame, deltaTime,
                                       m_sceneTreePanel->GetSelectedNode(), m_rootNode.get());
         }
         if (m_showSceneTree && m_sceneTreePanel) {
@@ -1034,7 +1178,7 @@ void EditorApp::Run() {
         // Record Commands & Submit
         VkCommandBuffer cmd = m_commandBuffers[currentFrame];
         vkResetCommandBuffer(cmd, 0);
-        RecordCommandBuffer(cmd, imageIndex);
+        RecordCommandBuffer(cmd, imageIndex, currentFrame);
 
         khepri::QueueSubmitDescriptor submitDesc{};
         submitDesc.commandBuffer = cmd;

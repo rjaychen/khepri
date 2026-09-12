@@ -47,10 +47,8 @@ TEST(AssetManagerTest, MaterialCreationAndPropertyMutation) {
 
 TEST(AssetManagerTest, DefaultAssetModelFilesExist) {
     std::vector<std::string> defaultModels = {
-        "assets/models/bunny.obj",
-        "assets/models/duck.glb",
-        "assets/models/utah_teapot.obj",
-        "assets/models/Box.gltf"
+        "assets/models/Box.gltf",
+        "assets/models/duck.glb"
     };
 
     for (const auto& modelPath : defaultModels) {

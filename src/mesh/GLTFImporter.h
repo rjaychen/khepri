@@ -11,16 +11,14 @@ public:
     [[nodiscard]] std::expected<std::shared_ptr<SceneNode>, khepri::ImportError> Import(
         VulkanContext& context, const std::string& filepath,
         VkDescriptorSetLayout setLayout = VK_NULL_HANDLE,
-        DescriptorAllocator* allocator = nullptr,
-        VkBuffer lightUBOBuffer = VK_NULL_HANDLE) override;
+        DescriptorAllocator* allocator = nullptr) override;
 
     // Static facade methods maintained for backward compatibility
     static std::expected<std::shared_ptr<SceneNode>, khepri::ImportError> LoadFromFile(
         VulkanContext& context, const std::string& filepath,
         VkDescriptorSetLayout setLayout = VK_NULL_HANDLE,
-        DescriptorAllocator* allocator = nullptr,
-        VkBuffer lightUBOBuffer = VK_NULL_HANDLE) {
-        return ModelImporter::LoadFromFile(context, filepath, setLayout, allocator, lightUBOBuffer);
+        DescriptorAllocator* allocator = nullptr) {
+        return ModelImporter::LoadFromFile(context, filepath, setLayout, allocator);
     }
 
     static std::shared_ptr<MeshComponent> CreateSampleMesh(VulkanContext& context, const std::string& primitiveName) {

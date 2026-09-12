@@ -11,7 +11,7 @@
 class Texture {
 public:
     Texture(VulkanContext& context, uint32_t width, uint32_t height, const unsigned char* pixels,
-            VkDescriptorSetLayout setLayout, DescriptorAllocator& allocator, VkBuffer lightUBOBuffer = VK_NULL_HANDLE);
+            VkDescriptorSetLayout setLayout, DescriptorAllocator& allocator);
     ~Texture();
 
     Texture(const Texture&) = delete;
@@ -26,17 +26,17 @@ public:
     uint32_t GetHeight() const { return m_height; }
 
     static std::shared_ptr<Texture> CreateFromMemory(VulkanContext& context, const uint8_t* data, size_t size,
-                                                      VkDescriptorSetLayout setLayout, DescriptorAllocator& allocator, VkBuffer lightUBOBuffer = VK_NULL_HANDLE);
+                                                      VkDescriptorSetLayout setLayout, DescriptorAllocator& allocator);
     static std::shared_ptr<Texture> CreateFromFile(VulkanContext& context, const std::string& filepath,
-                                                    VkDescriptorSetLayout setLayout, DescriptorAllocator& allocator, VkBuffer lightUBOBuffer = VK_NULL_HANDLE);
+                                                    VkDescriptorSetLayout setLayout, DescriptorAllocator& allocator);
     static std::shared_ptr<Texture> CreateWhiteTexture(VulkanContext& context,
-                                                       VkDescriptorSetLayout setLayout, DescriptorAllocator& allocator, VkBuffer lightUBOBuffer = VK_NULL_HANDLE);
+                                                       VkDescriptorSetLayout setLayout, DescriptorAllocator& allocator);
 
 private:
     void CreateTextureImage(const unsigned char* pixels);
     void CreateImageView();
     void CreateSampler();
-    void CreateDescriptorSet(VkDescriptorSetLayout setLayout, DescriptorAllocator& allocator, VkBuffer lightUBOBuffer);
+    void CreateDescriptorSet(VkDescriptorSetLayout setLayout, DescriptorAllocator& allocator);
 
     VulkanContext& m_context;
     uint32_t m_width = 0;

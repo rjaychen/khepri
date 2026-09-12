@@ -31,6 +31,9 @@ public:
     void SetFullscreen(bool fullscreen);
     [[nodiscard]] bool IsFullscreen() const noexcept { return m_isFullscreen; }
 
+    void SetCursorLocked(bool locked);
+    [[nodiscard]] bool IsCursorLocked() const noexcept { return m_cursorLocked; }
+
     VkSurfaceKHR CreateSurface(VkInstance instance);
 
     void SetTitle(const std::string& title);
@@ -49,6 +52,7 @@ private:
     std::string m_title;
     bool m_resized = false;
     bool m_isFullscreen = false;
+    bool m_cursorLocked = false;
     int m_savedWindowedX = 100;
     int m_savedWindowedY = 100;
     int m_savedWindowedWidth = 1280;

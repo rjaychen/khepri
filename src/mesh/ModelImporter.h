@@ -20,15 +20,13 @@ public:
     [[nodiscard]] virtual std::expected<std::shared_ptr<SceneNode>, khepri::ImportError> Import(
         VulkanContext& context, const std::string& filepath,
         VkDescriptorSetLayout setLayout = VK_NULL_HANDLE,
-        DescriptorAllocator* allocator = nullptr,
-        VkBuffer lightUBOBuffer = VK_NULL_HANDLE) = 0;
+        DescriptorAllocator* allocator = nullptr) = 0;
 
     // Static Dispatcher Facade
     [[nodiscard]] static std::expected<std::shared_ptr<SceneNode>, khepri::ImportError> LoadFromFile(
         VulkanContext& context, const std::string& filepath,
         VkDescriptorSetLayout setLayout = VK_NULL_HANDLE,
-        DescriptorAllocator* allocator = nullptr,
-        VkBuffer lightUBOBuffer = VK_NULL_HANDLE);
+        DescriptorAllocator* allocator = nullptr);
 
     static std::shared_ptr<MeshComponent> CreateSampleMesh(VulkanContext& context, const std::string& primitiveName);
 

@@ -233,11 +233,14 @@ void VulkanContext::CreateLogicalDevice() {
     deviceFeatures.samplerAnisotropy = VK_TRUE;
     deviceFeatures.fillModeNonSolid = VK_TRUE; // Enable wireframe rendering for computational geometry!
 
-    // Vulkan 1.3 features (Dynamic Rendering & Synchronization2)
+    // Vulkan 1.3 features (Dynamic Rendering, Synchronization2, and DemoteToHelperInvocation)
     VkPhysicalDeviceVulkan13Features vulkan13Features{};
     vulkan13Features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES;
     vulkan13Features.dynamicRendering = VK_TRUE;
     vulkan13Features.synchronization2 = VK_TRUE;
+    if (m_physicalDevice.GetVulkan13Features().shaderDemoteToHelperInvocation) {
+        vulkan13Features.shaderDemoteToHelperInvocation = VK_TRUE;
+    }
 
     VkDeviceCreateInfo createInfo{};
     createInfo.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;

@@ -44,7 +44,7 @@ void Camera::SetOrientation(float yawDegrees, float pitchDegrees) {
 }
 
 void Camera::Orbit(float deltaX, float deltaY) {
-    float sensitivity = 0.5f;
+    float sensitivity = 0.25f;
     m_yaw += deltaX * sensitivity;
     m_pitch -= deltaY * sensitivity;
 
@@ -91,11 +91,12 @@ void Camera::Look(float deltaX, float deltaY) {
 void Camera::Fly(glm::vec3 moveDir, float deltaTime) {
     if (glm::length(moveDir) < 0.001f) return;
 
+    float clampedDelta = std::clamp(deltaTime, 0.0001f, 0.1f);
     glm::vec3 forward = glm::normalize(m_target - m_position);
     glm::vec3 right = glm::normalize(glm::cross(forward, m_up));
     glm::vec3 up = m_up;
 
-    glm::vec3 velocity = (forward * moveDir.z + right * moveDir.x + up * moveDir.y) * m_flySpeed * deltaTime;
+    glm::vec3 velocity = (forward * moveDir.z + right * moveDir.x + up * moveDir.y) * m_flySpeed * clampedDelta;
     m_position += velocity;
     m_target += velocity;
 }

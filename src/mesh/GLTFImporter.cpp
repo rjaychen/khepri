@@ -17,7 +17,7 @@ bool GLTFImporter::CanImport(const std::string& filepath) const {
 }
 
 std::expected<std::shared_ptr<SceneNode>, khepri::ImportError> GLTFImporter::Import(VulkanContext& context, const std::string& filepath,
-                                                 VkDescriptorSetLayout setLayout, DescriptorAllocator* allocator, VkBuffer lightUBOBuffer) {
+                                                 VkDescriptorSetLayout setLayout, DescriptorAllocator* allocator) {
     LOG_INFO("Loading glTF model via GLTFImporter: " + filepath);
 
     std::string resolvedPath = filepath;
@@ -125,7 +125,7 @@ std::expected<std::shared_ptr<SceneNode>, khepri::ImportError> GLTFImporter::Imp
                                 const uint8_t* imgData = reinterpret_cast<const uint8_t*>(image->buffer_view->buffer->data)
                                                        + image->buffer_view->offset;
                                 size_t imgSize = image->buffer_view->size;
-                                primitiveTexture = Texture::CreateFromMemory(context, imgData, imgSize, setLayout, *allocator, lightUBOBuffer);
+                                primitiveTexture = Texture::CreateFromMemory(context, imgData, imgSize, setLayout, *allocator);
                             } else if (image->uri) {
                                 std::string uriStr = image->uri;
                                 std::string dir = "";
@@ -134,7 +134,7 @@ std::expected<std::shared_ptr<SceneNode>, khepri::ImportError> GLTFImporter::Imp
                                     dir = filepath.substr(0, lastSlash + 1);
                                 }
                                 std::string fullImagePath = dir + uriStr;
-                                primitiveTexture = Texture::CreateFromFile(context, fullImagePath, setLayout, *allocator, lightUBOBuffer);
+                                primitiveTexture = Texture::CreateFromFile(context, fullImagePath, setLayout, *allocator);
                             }
                         }
                     }

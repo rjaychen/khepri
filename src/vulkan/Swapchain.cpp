@@ -255,9 +255,21 @@ VkSurfaceFormatKHR Swapchain::ChooseSurfaceFormat(const std::vector<VkSurfaceFor
 }
 
 VkPresentModeKHR Swapchain::ChoosePresentMode(const std::vector<VkPresentModeKHR>& availablePresentModes) {
-    for (const auto& availablePresentMode : availablePresentModes) {
-        if (availablePresentMode == VK_PRESENT_MODE_MAILBOX_KHR) {
-            return availablePresentMode;
+    std::vector<VkPresentModeKHR> preferred;
+    switch (m_presentMode) {
+        case PresentMode::Mailbox:
+            preferred = { VK_PRESENT_MODE_MAILBOX_KHR, VK_PRESENT_MODE_IMMEDIATE_KHR };
+            break;
+        case PresentMode::Immediate:
+            preferred = { VK_PRESENT_MODE_IMMEDIATE_KHR, VK_PRESENT_MODE_MAILBOX_KHR };
+            break;
+        case PresentMode::VSync:
+            return VK_PRESENT_MODE_FIFO_KHR;
+    }
+
+    for (VkPresentModeKHR want : preferred) {
+        for (const auto& available : availablePresentModes) {
+            if (available == want) return available;
         }
     }
     return VK_PRESENT_MODE_FIFO_KHR; // Guaranteed to be supported
@@ -285,4 +297,20 @@ VkFormat Swapchain::FindDepthFormat() {
     }
     LOG_ERROR("Failed to find supported depth format!");
     throw std::runtime_error("Failed to find supported depth format!");
+}
+
+void Swapchain::SetPresentMode(PresentMode mode) {
+    if (m_presentMode == mode) return;
+    m_presentMode = mode;
+    m_pendingPresentModeChange = true;
+    const char* modeName =
+        (mode == PresentMode::Mailbox)   ? "Mailbox (triple-buffered)" :
+        (mode == PresentMode::Immediate) ? "Immediate (uncapped)" : "VSync (FIFO)";
+    LOG_INFO(std::string("Swapchain: present mode change requested: ") + modeName);
+}
+
+void Swapchain::ApplyPendingPresentModeChange() {
+    if (!m_pendingPresentModeChange) return;
+    m_pendingPresentModeChange = false;
+    Recreate(m_extent.width, m_extent.height);
 }
