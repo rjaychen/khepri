@@ -99,8 +99,12 @@ PipelineBuilder& PipelineBuilder::SetDepthFormat(VkFormat format) {
 }
 
 PipelineBuilder& PipelineBuilder::EnableDepthTest(bool depthWriteEnable, VkCompareOp op) {
+    return SetDepthTest(true, depthWriteEnable, op);
+}
+
+PipelineBuilder& PipelineBuilder::SetDepthTest(bool depthTestEnable, bool depthWriteEnable, VkCompareOp op) {
     m_depthStencil.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
-    m_depthStencil.depthTestEnable = VK_TRUE;
+    m_depthStencil.depthTestEnable = depthTestEnable ? VK_TRUE : VK_FALSE;
     m_depthStencil.depthWriteEnable = depthWriteEnable ? VK_TRUE : VK_FALSE;
     m_depthStencil.depthCompareOp = op;
     m_depthStencil.depthBoundsTestEnable = VK_FALSE;

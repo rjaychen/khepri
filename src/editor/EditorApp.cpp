@@ -10,32 +10,9 @@
 #include <chrono>
 #include <fstream>
 #include <array>
+#include <imgui.h>
+#include <imgui_impl_vulkan.h>
 #include <imgui_internal.h>
-
-void EditorApp::ApplyDockLayout(ImGuiID dockspaceID) {
-    ImGui::DockBuilderRemoveNode(dockspaceID);
-    ImGui::DockBuilderAddNode(dockspaceID, ImGuiDockNodeFlags_DockSpace);
-    ImGui::DockBuilderSetNodeSize(dockspaceID, ImGui::GetMainViewport()->Size);
-
-    ImGuiID dockMain = dockspaceID;
-    ImGuiID dockLeft = ImGui::DockBuilderSplitNode(dockMain, ImGuiDir_Left, 0.22f, nullptr, &dockMain);
-    ImGuiID dockRight = ImGui::DockBuilderSplitNode(dockMain, ImGuiDir_Right, 0.25f, nullptr, &dockMain);
-    ImGuiID dockBottom = ImGui::DockBuilderSplitNode(dockMain, ImGuiDir_Down, 0.22f, nullptr, &dockMain);
-
-    ImGuiID dockRightTop = dockRight;
-    ImGuiID dockRightBottom = ImGui::DockBuilderSplitNode(dockRightTop, ImGuiDir_Down, 0.45f, nullptr, &dockRightTop);
-
-    ImGui::DockBuilderDockWindow("Scene Hierarchy", dockLeft);
-    ImGui::DockBuilderDockWindow("3D Viewport", dockMain);
-    ImGui::DockBuilderDockWindow("Inspector", dockRightTop);
-    ImGui::DockBuilderDockWindow("Vulkan Educational Inspector", dockRightBottom);
-    ImGui::DockBuilderDockWindow("Animation Timeline", dockBottom);
-    ImGui::DockBuilderDockWindow("Engine Log Console", dockBottom);
-    ImGui::DockBuilderDockWindow("Procedural Node Graph Editor", dockBottom);
-    ImGui::DockBuilderDockWindow("Asset Manager", dockBottom);
-
-    ImGui::DockBuilderFinish(dockspaceID);
-}
 
 void EditorApp::SetEditorMode(EditorMode mode) {
     m_currentMode = mode;
@@ -43,10 +20,11 @@ void EditorApp::SetEditorMode(EditorMode mode) {
 
 void EditorApp::OpenSceneModel(const std::string& path) {
     m_context->WaitIdle();
-    if (m_sceneTreePanel) {
-        m_sceneTreePanel->ClearSelectedNode();
+    if (m_uiSubsystem) {
+        m_uiSubsystem->ClearSelection();
     }
-    auto loadedNodeResult = ModelImporter::LoadFromFile(*m_context, path, m_textureDescriptorSetLayout, m_descriptorAllocator.get());
+    VkDescriptorSetLayout texLayout = m_sceneRenderer ? m_sceneRenderer->GetTextureDescriptorSetLayout() : VK_NULL_HANDLE;
+    auto loadedNodeResult = ModelImporter::LoadFromFile(*m_context, path, texLayout, m_descriptorAllocator.get());
     if (loadedNodeResult.has_value()) {
         m_rootNode = loadedNodeResult.value();
 
@@ -56,12 +34,8 @@ void EditorApp::OpenSceneModel(const std::string& path) {
         const auto& children = m_rootNode->GetChildren();
         if (!children.empty() && children[0]->mesh) {
             m_activeDisplayMesh = children[0]->mesh;
-            if (m_sceneTreePanel) {
-                m_sceneTreePanel->SetSelectedNode(children[0].get());
-            }
-            if (m_nodeGraphEditorPanel) {
-                m_nodeGraphEditorPanel->SetTargetSceneNode(children[0].get());
-                m_nodeGraphEditorPanel->SetImportedMesh(m_activeDisplayMesh);
+            if (m_uiSubsystem) {
+                m_uiSubsystem->OnSceneLoaded(m_rootNode.get(), m_activeDisplayMesh);
             }
         }
         m_camera.FocusOnTarget(glm::vec3(0.0f), 4.0f);
@@ -73,7 +47,8 @@ void EditorApp::OpenSceneModel(const std::string& path) {
 
 void EditorApp::ImportModelIntoScene(const std::string& path) {
     m_context->WaitIdle();
-    auto loadedNodeResult = ModelImporter::LoadFromFile(*m_context, path, m_textureDescriptorSetLayout, m_descriptorAllocator.get());
+    VkDescriptorSetLayout texLayout = m_sceneRenderer ? m_sceneRenderer->GetTextureDescriptorSetLayout() : VK_NULL_HANDLE;
+    auto loadedNodeResult = ModelImporter::LoadFromFile(*m_context, path, texLayout, m_descriptorAllocator.get());
     if (loadedNodeResult.has_value()) {
         auto loadedNode = loadedNodeResult.value();
         if (!m_rootNode) {
@@ -102,13 +77,8 @@ void EditorApp::ImportModelIntoScene(const std::string& path) {
             newlyAdded = m_rootNode->AddChild(std::move(importedChild));
         }
 
-        if (newlyAdded && m_sceneTreePanel) {
-            m_sceneTreePanel->SetSelectedNode(newlyAdded);
-        }
-
-        if (m_activeDisplayMesh && m_nodeGraphEditorPanel && newlyAdded) {
-            m_nodeGraphEditorPanel->SetTargetSceneNode(newlyAdded);
-            m_nodeGraphEditorPanel->SetImportedMesh(m_activeDisplayMesh);
+        if (newlyAdded && m_uiSubsystem) {
+            m_uiSubsystem->OnModelImported(newlyAdded, m_activeDisplayMesh);
         }
         m_camera.FocusOnTarget(glm::vec3(0.0f), 4.0f);
         LOG_INFO("Imported model into current scene: " + path);
@@ -119,8 +89,8 @@ void EditorApp::ImportModelIntoScene(const std::string& path) {
 
 void EditorApp::LoadSampleModel(const std::string& name) {
     m_context->WaitIdle();
-    if (m_sceneTreePanel) {
-        m_sceneTreePanel->ClearSelectedNode();
+    if (m_uiSubsystem) {
+        m_uiSubsystem->ClearSelection();
     }
     if (name == "Box") {
         OpenSceneModel("assets/models/Box.gltf");
@@ -130,267 +100,12 @@ void EditorApp::LoadSampleModel(const std::string& name) {
         auto childNode = std::make_unique<SceneNode>(name + " Node");
         childNode->mesh = m_activeDisplayMesh;
         SceneNode* addedChild = m_rootNode->AddChild(std::move(childNode));
-        if (m_sceneTreePanel) {
-            m_sceneTreePanel->SetSelectedNode(addedChild);
-        }
-        if (m_nodeGraphEditorPanel) {
-            m_nodeGraphEditorPanel->SetTargetSceneNode(addedChild);
-            m_nodeGraphEditorPanel->SetImportedMesh(m_activeDisplayMesh);
+        if (m_uiSubsystem) {
+            m_uiSubsystem->OnModelImported(addedChild, m_activeDisplayMesh);
         }
         m_camera.FocusOnTarget(glm::vec3(0.0f), 4.0f);
         LOG_INFO("Loaded sample primitive model: " + name);
     }
-}
-
-void EditorApp::RenderMainMenuBar(ImGuiID dockspaceID) {
-    (void)dockspaceID;
-    if (ImGui::BeginMainMenuBar()) {
-        std::string versionTitle = std::string("Khepri Engine v") + KhepriEngine::VERSION_STRING;
-        ImGui::TextColored(ImVec4(0.3f, 0.8f, 1.0f, 1.0f), "%s", versionTitle.c_str());
-        ImGui::Separator();
-
-        if (ImGui::BeginMenu("File")) {
-            if (ImGui::MenuItem("Open Scene / 3D Model...")) {
-                std::string selectedPath = FileDialog::OpenFile();
-                if (!selectedPath.empty()) {
-                    OpenSceneModel(selectedPath);
-                }
-            }
-            if (ImGui::MenuItem("Import 3D Model into Current Scene...")) {
-                std::string selectedPath = FileDialog::OpenFile();
-                if (!selectedPath.empty()) {
-                    ImportModelIntoScene(selectedPath);
-                }
-            }
-            if (ImGui::MenuItem("Enter Model Path...")) {
-                m_openGltfModal = true;
-            }
-            if (ImGui::BeginMenu("Sample 3D Models")) {
-                if (ImGui::MenuItem("Box (glTF)"))  LoadSampleModel("Box");
-                if (ImGui::MenuItem("Sphere"))       LoadSampleModel("Sphere");
-                if (ImGui::MenuItem("Cylinder"))     LoadSampleModel("Cylinder");
-                if (ImGui::MenuItem("Plane"))        LoadSampleModel("Plane");
-                ImGui::EndMenu();
-            }
-            ImGui::EndMenu();
-        }
-
-        if (ImGui::BeginMenu("Edit")) {
-            std::string undoLabel = "Undo";
-            if (m_undoStack.CanUndo()) {
-                undoLabel += " " + std::string(m_undoStack.GetUndoCommandName());
-            }
-            if (ImGui::MenuItem(undoLabel.c_str(), "Ctrl+Z", false, m_undoStack.CanUndo())) {
-                m_undoStack.Undo();
-            }
-
-            std::string redoLabel = "Redo";
-            if (m_undoStack.CanRedo()) {
-                redoLabel += " " + std::string(m_undoStack.GetRedoCommandName());
-            }
-            if (ImGui::MenuItem(redoLabel.c_str(), "Ctrl+Y", false, m_undoStack.CanRedo())) {
-                m_undoStack.Redo();
-            }
-
-            ImGui::Separator();
-            if (ImGui::MenuItem("Clear Undo History", nullptr, false, m_undoStack.GetUndoCount() > 0 || m_undoStack.GetRedoCount() > 0)) {
-                m_undoStack.Clear();
-            }
-            ImGui::EndMenu();
-        }
-
-        if (ImGui::BeginMenu("View")) {
-            if (ImGui::MenuItem("Reset Camera View (F)")) {
-                m_camera.FocusOnTarget(glm::vec3(0.0f));
-            }
-            bool gridVis = m_viewportPanel ? m_viewportPanel->IsGridVisible() : true;
-            if (ImGui::MenuItem("Show 3D Ground Grid", "G", &gridVis)) {
-                if (m_viewportPanel) m_viewportPanel->SetGridVisible(gridVis);
-            }
-            if (ImGui::MenuItem("Toggle Fullscreen", "F11", m_window.IsFullscreen())) {
-                m_window.ToggleFullscreen();
-            }
-            if (ImGui::MenuItem("Reset Layout")) {
-                m_rebuildLayout = true;
-            }
-            if (ImGui::BeginMenu("Set Application Resolution")) {
-                if (ImGui::MenuItem("1280 x 720 (720p HD)")) {
-                    glfwSetWindowSize(m_window.GetNativeWindow(), 1280, 720);
-                }
-                if (ImGui::MenuItem("1600 x 900 (900p HD+)")) {
-                    glfwSetWindowSize(m_window.GetNativeWindow(), 1600, 900);
-                }
-                if (ImGui::MenuItem("1920 x 1080 (1080p Full HD)")) {
-                    glfwSetWindowSize(m_window.GetNativeWindow(), 1920, 1080);
-                }
-                if (ImGui::MenuItem("2560 x 1440 (1440p QHD)")) {
-                    glfwSetWindowSize(m_window.GetNativeWindow(), 2560, 1440);
-                }
-                ImGui::EndMenu();
-            }
-            ImGui::EndMenu();
-        }
-
-        if (ImGui::BeginMenu("Window")) {
-            ImGui::MenuItem("Viewport", nullptr, &m_showViewport);
-            ImGui::MenuItem("Scene Hierarchy", nullptr, &m_showSceneTree);
-            ImGui::MenuItem("Node Graph Editor", nullptr, &m_showNodeGraph);
-            ImGui::MenuItem("Timeline / Animation", nullptr, &m_showTimeline);
-            ImGui::MenuItem("Asset Manager", nullptr, &m_showAssetManager);
-            ImGui::MenuItem("Vulkan Inspector", nullptr, &m_showVulkanInspector);
-            ImGui::MenuItem("Engine Log Console", nullptr, &m_showLogConsole);
-            ImGui::Separator();
-            if (ImGui::MenuItem("Show All Windows")) {
-                m_showViewport = m_showSceneTree = m_showNodeGraph = m_showTimeline = m_showAssetManager = m_showVulkanInspector = m_showLogConsole = true;
-            }
-            if (ImGui::MenuItem("Hide All Windows")) {
-                m_showViewport = m_showSceneTree = m_showNodeGraph = m_showTimeline = m_showAssetManager = m_showVulkanInspector = m_showLogConsole = false;
-            }
-            ImGui::EndMenu();
-        }
-
-        if (ImGui::BeginMenu("Help")) {
-            if (ImGui::MenuItem("About Khepri Engine")) {
-                ImGui::OpenPopup("About Khepri Engine Modal");
-            }
-            ImGui::EndMenu();
-        }
-
-        // Model import path modal
-        if (m_openGltfModal) {
-            ImGui::OpenPopup("Import 3D Model Path");
-            m_openGltfModal = false;
-        }
-
-        if (ImGui::BeginPopupModal("Import 3D Model Path", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
-            ImGui::Text("Enter local filepath or browse for .gltf / .glb / .obj / .stl file:");
-            ImGui::InputText("Path", m_gltfPathInput, sizeof(m_gltfPathInput));
-            ImGui::SameLine();
-            if (ImGui::Button("Browse...")) {
-                std::string selectedPath = FileDialog::OpenFile();
-                if (!selectedPath.empty()) {
-                    strncpy(m_gltfPathInput, selectedPath.c_str(), sizeof(m_gltfPathInput));
-                    m_gltfPathInput[sizeof(m_gltfPathInput) - 1] = '\0';
-                }
-            }
-            if (ImGui::Button("Load Model", ImVec2(120, 0))) {
-                LoadGLTFModel(m_gltfPathInput);
-                ImGui::CloseCurrentPopup();
-            }
-            ImGui::SameLine();
-            if (ImGui::Button("Cancel", ImVec2(120, 0))) {
-                ImGui::CloseCurrentPopup();
-            }
-            ImGui::EndPopup();
-        }
-
-        if (ImGui::BeginPopupModal("About Khepri Engine Modal", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
-            ImGui::TextColored(ImVec4(0.4f, 0.8f, 1.0f, 1.0f), "Khepri Engine v1.0");
-            ImGui::Text("Data-Oriented Vulkan Graphics & Computational Geometry Engine");
-            ImGui::Separator();
-            ImGui::Text("• Control Scheme: Unreal Engine Flycam (RMB+WASDQE) & MeshLab Trackball");
-            ImGui::Text("• Asset Importer: glTF 2.0 (.gltf / .glb)");
-            ImGui::Text("• Architecture: Two-Tiered Data-Oriented Index-Based Mesh Topology");
-            ImGui::Text("• Performance: Double-buffered in-flight offscreen targets & zero-copy compute pipelines");
-            ImGui::Separator();
-            if (ImGui::Button("Close")) {
-                ImGui::CloseCurrentPopup();
-            }
-            ImGui::EndPopup();
-        }
-
-        ImGui::EndMainMenuBar();
-    }
-}
-
-static void RenderEngineLogConsole(bool* p_open = nullptr) {
-    if (p_open && !*p_open) return;
-    if (!ImGui::Begin("Engine Log Console", p_open)) {
-        ImGui::End();
-        return;
-    }
-    if (ImGui::Button("Clear Logs")) {
-        Logger::Get().ClearLogs();
-    }
-    ImGui::SameLine();
-    static bool autoScroll = true;
-    ImGui::Checkbox("Auto-scroll", &autoScroll);
-    ImGui::Separator();
-
-    ImGui::BeginChild("LogScrollRegion", ImVec2(0, 0), false, ImGuiWindowFlags_HorizontalScrollbar);
-    for (const auto& log : Logger::Get().GetLogs()) {
-        ImVec4 color(0.9f, 0.9f, 0.9f, 1.0f);
-        if (log.level == LogLevel::Warning)     color = ImVec4(1.0f, 0.8f, 0.2f, 1.0f);
-        else if (log.level == LogLevel::Error)  color = ImVec4(1.0f, 0.3f, 0.3f, 1.0f);
-        else if (log.level == LogLevel::VulkanDebug) color = ImVec4(0.4f, 0.7f, 1.0f, 1.0f);
-
-        ImGui::TextColored(color, "[%s] %s", log.timestamp.c_str(), log.message.c_str());
-    }
-    if (autoScroll && ImGui::GetScrollY() >= ImGui::GetScrollMaxY()) {
-        ImGui::SetScrollHereY(1.0f);
-    }
-    ImGui::EndChild();
-    ImGui::End();
-}
-
-struct PushConstants {
-    glm::mat4 mvp;
-    glm::mat4 model;
-    glm::vec4 baseColorFactor{1.0f, 1.0f, 1.0f, 1.0f};
-    glm::vec4 emissiveFactor{0.0f, 0.0f, 0.0f, 1.0f};
-    int32_t useTexture = 0;
-    float shininess = 32.0f;
-    float specularStrength = 0.5f;
-    float ambientStrength = 0.15f;
-};
-
-struct GridPushConstants {
-    glm::mat4 viewProj;
-    glm::mat4 invViewProj;
-    glm::vec4 cameraPos;
-    glm::vec4 gridParams; // x = cellSize, y = majorStep, z = maxDistance, w = opacity
-};
-
-const std::vector<uint32_t>& EditorApp::GetOrLoadSPIRV(const std::string& path) {
-    auto it = m_spirvCache.find(path);
-    if (it != m_spirvCache.end()) {
-        return it->second;
-    }
-
-    std::string filename = path;
-    size_t lastSlash = path.find_last_of("/\\");
-    if (lastSlash != std::string::npos) {
-        filename = path.substr(lastSlash + 1);
-    }
-
-    std::vector<std::string> candidatePaths = {
-        path,
-        "shaders/compiled/" + filename,
-        "../" + path,
-        "../../" + path,
-        "../../../" + path,
-        "../shaders/compiled/" + filename,
-        "../../shaders/compiled/" + filename,
-        "../../../shaders/compiled/" + filename
-    };
-
-    for (const auto& candidate : candidatePaths) {
-        std::ifstream file(candidate, std::ios::ate | std::ios::binary);
-        if (file.is_open()) {
-            size_t fileSize = static_cast<size_t>(file.tellg());
-            if (fileSize > 0) {
-                std::vector<uint32_t> buffer(fileSize / sizeof(uint32_t));
-                file.seekg(0);
-                file.read(reinterpret_cast<char*>(buffer.data()), fileSize);
-                LOG_INFO("Successfully loaded shader SPIR-V from: " + candidate);
-                m_spirvCache[path] = std::move(buffer);
-                return m_spirvCache[path];
-            }
-        }
-    }
-
-    LOG_ERROR("Failed to open shader file across all candidate paths: " + path);
-    throw std::runtime_error("Failed to open shader file: " + path);
 }
 
 EditorApp::EditorApp()
@@ -400,66 +115,37 @@ EditorApp::EditorApp()
     m_swapchain = std::make_unique<Swapchain>(*m_context, m_window.GetWidth(), m_window.GetHeight());
     m_descriptorAllocator = std::make_unique<DescriptorAllocator>(*m_context, 100);
 
-    InitImGui();
-    InitRenderResources();
-    CreateRenderPipeline();
-    CreateGridPipeline();
-
-    // Init Viewport & Editor Panels
-    m_viewportPanel = std::make_unique<ViewportPanel>(*m_context);
-    m_viewportPanel->GetGizmo().SetUndoStack(&m_undoStack);
-    m_sceneTreePanel = std::make_unique<SceneTreePanel>(*m_context);
-    m_sceneTreePanel->SetUndoStack(&m_undoStack);
-    m_timelinePanel = std::make_unique<TimelinePanel>();
-    m_vulkanInspectorPanel = std::make_unique<VulkanInspectorPanel>(*m_context);
-
-    // Initialize AssetManager & Node Graph Engine
-    khepri::AssetManager::Instance().Initialize(*m_context);
-    m_nodeGraphEditorPanel = std::make_unique<khepri::NodeGraphEditorPanel>(*m_context);
-    m_nodeGraphEditorPanel->SetUndoStack(&m_undoStack);
-    m_assetManagerPanel = std::make_unique<khepri::AssetManagerPanel>();
-
-    // Connect Asset & Viewport callbacks
-    m_assetManagerPanel->SetOpenModelCallback([this](const std::string& path) {
-        OpenSceneModel(path);
-    });
-    m_assetManagerPanel->SetImportModelCallback([this](const std::string& path) {
-        ImportModelIntoScene(path);
-    });
-    m_viewportPanel->SetImportModelCallback([this](const std::string& path) {
-        ImportModelIntoScene(path);
-    });
-    m_viewportPanel->SetSelectNodeCallback([this](SceneNode* node) {
-        if (m_sceneTreePanel) {
-            m_sceneTreePanel->SetSelectedNode(node);
-        }
-    });
-    m_sceneTreePanel->SetImportModelCallback([this](const std::string& path) {
-        ImportModelIntoScene(path);
-    });
-    m_sceneTreePanel->SetOpenModelCallback([this](const std::string& path) {
-        OpenSceneModel(path);
+    // Command Pool & Command Buffers for Swapchain rendering
+    m_commandPool = m_context->CreateCommandPool(VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT);
+    m_commandBuffers = m_context->AllocateCommandBuffers(m_commandPool, Swapchain::MAX_FRAMES_IN_FLIGHT);
+    m_deletionQueue.Push([device = m_context->GetDevice(), pool = m_commandPool]() {
+        vkDestroyCommandPool(device, pool, nullptr);
     });
 
-    // Centralized Undo/Redo state observer
-    m_undoStack.SetChangeListener([this]() {
-        if (m_sceneTreePanel) {
-            m_sceneTreePanel->ValidateSelection(m_rootNode.get());
-        }
-        if (m_nodeGraphEditorPanel) {
-            m_nodeGraphEditorPanel->ValidateTargetSceneNode(m_rootNode.get());
-            SceneNode* sel = m_sceneTreePanel ? m_sceneTreePanel->GetSelectedNode() : nullptr;
-            if (m_nodeGraphEditorPanel->GetTargetSceneNode() != sel) {
-                m_nodeGraphEditorPanel->SetTargetSceneNode(sel);
-            }
-            if (sel && sel->nodeGraph) {
-                sel->nodeGraph->Evaluate();
-                if (auto outMesh = m_nodeGraphEditorPanel->GetActiveOutputMesh()) {
-                    if (!sel->lightComponent) sel->mesh = outMesh;
-                }
-            }
-        }
+    // 1. Populate EngineContext service bridge for subsystems
+    m_engineContext = std::make_unique<khepri::EngineContext>(khepri::EngineContext{
+        .window = &m_window,
+        .vulkanContext = m_context.get(),
+        .swapchain = m_swapchain.get(),
+        .descriptorAllocator = m_descriptorAllocator.get(),
+        .oracleBridge = &m_oracleBridge,
+        .camera = &m_camera,
+        .rootNode = &m_rootNode,
+        .activeDisplayMesh = &m_activeDisplayMesh,
+        .timeline = &m_timeline,
+        .undoStack = &m_undoStack,
+        .textureDescriptorSetLayout = VK_NULL_HANDLE,
+        .openSceneModel = [this](const std::string& path) { OpenSceneModel(path); },
+        .importModelIntoScene = [this](const std::string& path) { ImportModelIntoScene(path); }
     });
+
+    // 2. Register Subsystems: SceneRendererSubsystem FIRST, EditorUISubsystem SECOND
+    m_sceneRenderer = m_subsystemManager.AddSubsystem<khepri::SceneRendererSubsystem>();
+    m_uiSubsystem = m_subsystemManager.AddSubsystem<khepri::EditorUISubsystem>();
+
+    // 3. Forward initialization: SceneRenderer initializes graphics pipelines & descriptor layouts first,
+    // then EditorUI initializes ImGui and editor panels.
+    m_subsystemManager.InitializeAll(*m_engineContext);
 
     BuildSampleScene();
 
@@ -470,327 +156,19 @@ EditorApp::~EditorApp() {
     if (m_context) {
         m_context->WaitIdle();
     }
-    m_sceneTreePanel.reset();
-    m_timelinePanel.reset();
-    m_nodeGraphEditorPanel.reset();
-    m_vulkanInspectorPanel.reset();
-    m_assetManagerPanel.reset();
-    m_viewportPanel.reset();
-    m_rootNode.reset();
+
     m_activeDisplayMesh.reset();
-    m_defaultWhiteTexture.reset();
+    m_rootNode.reset();
 
-    for (auto& buf : m_lightUBOBuffers) {
-        buf.reset();
-    }
+    // 1. Shuts down all subsystems in strict reverse (LIFO) order:
+    // EditorUISubsystem shuts down first (panels + ImGui backend freed),
+    // SceneRendererSubsystem shuts down second (pipelines + buffers freed).
+    m_subsystemManager.ShutdownAll();
 
-    ImGui_ImplVulkan_Shutdown();
-    ImGui_ImplGlfw_Shutdown();
-    ImGui::DestroyContext();
-
-    if (m_context && m_context->GetDevice() != VK_NULL_HANDLE) {
-        VkDevice device = m_context->GetDevice();
-        for (VkPipeline* p : {&m_gridPipeline, &m_graphicsPipeline, &m_wireframePipeline}) {
-            if (*p != VK_NULL_HANDLE) {
-                vkDestroyPipeline(device, *p, nullptr);
-                *p = VK_NULL_HANDLE;
-            }
-        }
-    }
-
+    // 2. Teardown remaining application resources
     m_deletionQueue.Flush();
     m_descriptorAllocator.reset();
     m_swapchain.reset();
-}
-
-void EditorApp::InitImGui() {
-    VkDescriptorPoolSize poolSizes[] = {
-        { VK_DESCRIPTOR_TYPE_SAMPLER, 1000 },
-        { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1000 },
-        { VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 1000 },
-        { VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1000 },
-        { VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER, 1000 },
-        { VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER, 1000 },
-        { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1000 },
-        { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1000 },
-        { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC, 1000 },
-        { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER_DYNAMIC, 1000 },
-        { VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT, 1000 }
-    };
-    VkDescriptorPoolCreateInfo poolInfo{};
-    poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
-    poolInfo.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
-    poolInfo.maxSets = 1000 * IM_ARRAYSIZE(poolSizes);
-    poolInfo.poolSizeCount = (uint32_t)IM_ARRAYSIZE(poolSizes);
-    poolInfo.pPoolSizes = poolSizes;
-
-    vkCreateDescriptorPool(m_context->GetDevice(), &poolInfo, nullptr, &m_imguiPool);
-    m_deletionQueue.Push([device = m_context->GetDevice(), pool = m_imguiPool]() {
-        vkDestroyDescriptorPool(device, pool, nullptr);
-    });
-
-    IMGUI_CHECKVERSION();
-    ImGui::CreateContext();
-    ImGuiIO& io = ImGui::GetIO();
-    io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
-
-    ImGui::StyleColorsDark();
-
-    ImGui_ImplGlfw_InitForVulkan(m_window.GetNativeWindow(), true);
-
-    ImGui_ImplVulkan_InitInfo initInfo{};
-    initInfo.Instance = m_context->GetInstance();
-    initInfo.PhysicalDevice = m_context->GetPhysicalDevice();
-    initInfo.Device = m_context->GetDevice();
-    initInfo.QueueFamily = m_context->GetQueueFamilies().graphicsFamily.value();
-    initInfo.Queue = m_context->GetGraphicsQueue();
-    initInfo.PipelineCache = VK_NULL_HANDLE;
-    initInfo.DescriptorPool = m_imguiPool;
-    initInfo.MinImageCount = Swapchain::MAX_FRAMES_IN_FLIGHT;
-    initInfo.ImageCount = Swapchain::MAX_FRAMES_IN_FLIGHT;
-    initInfo.UseDynamicRendering = true;
-
-    VkPipelineRenderingCreateInfoKHR renderingInfo{};
-    renderingInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO_KHR;
-    VkFormat colorFormat = m_swapchain->GetImageFormat();
-    renderingInfo.colorAttachmentCount = 1;
-    renderingInfo.pColorAttachmentFormats = &colorFormat;
-
-    initInfo.PipelineInfoMain.MSAASamples = VK_SAMPLE_COUNT_1_BIT;
-    initInfo.PipelineInfoMain.PipelineRenderingCreateInfo = renderingInfo;
-
-    ImGui_ImplVulkan_Init(&initInfo);
-}
-
-void EditorApp::UpdateLightUBO(uint32_t currentFrame) {
-    uint32_t idx = currentFrame % Swapchain::MAX_FRAMES_IN_FLIGHT;
-    if (!m_lightUBOBuffers[idx] || !m_rootNode) return;
-
-    LightUBO ubo{};
-    ubo.cameraPos = glm::vec4(m_camera.GetPosition(), 0.0f);
-
-    std::vector<LightData> activeLights;
-
-    std::function<void(SceneNode*, const glm::mat4&)> collectLights = [&](SceneNode* node, const glm::mat4& parentTransform) {
-        if (!node || !node->visible) return;
-
-        glm::mat4 worldTransform = parentTransform * node->GetLocalTransform();
-
-        if (node->lightComponent) {
-            glm::vec3 worldPos = glm::vec3(worldTransform[3]);
-            glm::mat3 rotMat = glm::mat3(worldTransform);
-            glm::vec3 worldDir = rotMat * node->lightComponent->direction;
-
-            if (activeLights.size() < MAX_LIGHTS) {
-                activeLights.push_back(node->lightComponent->GetGPUData(worldPos, worldDir));
-            }
-        }
-
-        for (const auto& child : node->GetChildren()) {
-            collectLights(child.get(), worldTransform);
-        }
-    };
-
-    collectLights(m_rootNode.get(), glm::mat4(1.0f));
-
-    ubo.cameraPos.w = static_cast<float>(activeLights.size());
-    for (size_t i = 0; i < activeLights.size(); ++i) {
-        ubo.lights[i] = activeLights[i];
-    }
-
-    m_lightUBOBuffers[idx]->CopyToBuffer(&ubo, sizeof(LightUBO));
-}
-
-void EditorApp::InitRenderResources() {
-    // 1. Light Descriptor Set Layout (Set 0)
-    if (!m_lightDescriptorSetLayout) {
-        VkDescriptorSetLayoutBinding lightBinding{};
-        lightBinding.binding = 0;
-        lightBinding.descriptorCount = 1;
-        lightBinding.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-        lightBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
-
-        VkDescriptorSetLayoutCreateInfo layoutInfo{};
-        layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-        layoutInfo.bindingCount = 1;
-        layoutInfo.pBindings = &lightBinding;
-
-        const VkResult res = vkCreateDescriptorSetLayout(m_context->GetDevice(), &layoutInfo, nullptr, &m_lightDescriptorSetLayout);
-        CHECK_VK_RESULT(res, "Failed to create light descriptor set layout");
-        m_deletionQueue.Push([device = m_context->GetDevice(), layout = m_lightDescriptorSetLayout]() {
-            vkDestroyDescriptorSetLayout(device, layout, nullptr);
-        });
-    }
-
-    // 2. Texture Descriptor Set Layout (Set 1)
-    if (!m_textureDescriptorSetLayout) {
-        VkDescriptorSetLayoutBinding texBinding{};
-        texBinding.binding = 0;
-        texBinding.descriptorCount = 1;
-        texBinding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-        texBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
-
-        VkDescriptorSetLayoutCreateInfo layoutInfo{};
-        layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-        layoutInfo.bindingCount = 1;
-        layoutInfo.pBindings = &texBinding;
-
-        const VkResult res = vkCreateDescriptorSetLayout(m_context->GetDevice(), &layoutInfo, nullptr, &m_textureDescriptorSetLayout);
-        CHECK_VK_RESULT(res, "Failed to create texture descriptor set layout");
-        m_deletionQueue.Push([device = m_context->GetDevice(), layout = m_textureDescriptorSetLayout]() {
-            vkDestroyDescriptorSetLayout(device, layout, nullptr);
-        });
-    }
-
-    // 3. Light UBO Buffers & Descriptor Sets
-    for (uint32_t i = 0; i < Swapchain::MAX_FRAMES_IN_FLIGHT; ++i) {
-        if (!m_lightUBOBuffers[i]) {
-            m_lightUBOBuffers[i] = std::make_unique<Buffer>(
-                *m_context,
-                sizeof(LightUBO),
-                VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
-                VMA_MEMORY_USAGE_AUTO,
-                VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT | VMA_ALLOCATION_CREATE_MAPPED_BIT
-            );
-        }
-        if (m_lightDescriptorSets[i] == VK_NULL_HANDLE) {
-            m_lightDescriptorSets[i] = m_descriptorAllocator->Allocate(m_lightDescriptorSetLayout);
-            DescriptorWriter writer;
-            writer.WriteBuffer(0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, m_lightUBOBuffers[i]->GetBuffer(), sizeof(LightUBO));
-            writer.UpdateSet(*m_context, m_lightDescriptorSets[i]);
-        }
-    }
-
-    // 4. Default White Texture (Set 1)
-    if (!m_defaultWhiteTexture) {
-        m_defaultWhiteTexture = Texture::CreateWhiteTexture(*m_context, m_textureDescriptorSetLayout, *m_descriptorAllocator);
-    }
-
-    // 5. Mesh Pipeline Layout (Set 0: Light, Set 1: Texture)
-    if (!m_pipelineLayout) {
-        VkPushConstantRange pushConstant{};
-        pushConstant.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
-        pushConstant.offset = 0;
-        pushConstant.size = sizeof(PushConstants);
-
-        VkDescriptorSetLayout setLayouts[2] = { m_lightDescriptorSetLayout, m_textureDescriptorSetLayout };
-
-        VkPipelineLayoutCreateInfo layoutInfo{};
-        layoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-        layoutInfo.setLayoutCount = 2;
-        layoutInfo.pSetLayouts = setLayouts;
-        layoutInfo.pushConstantRangeCount = 1;
-        layoutInfo.pPushConstantRanges = &pushConstant;
-
-        const VkResult res = vkCreatePipelineLayout(m_context->GetDevice(), &layoutInfo, nullptr, &m_pipelineLayout);
-        CHECK_VK_RESULT(res, "Failed to create pipeline layout");
-        m_deletionQueue.Push([device = m_context->GetDevice(), layout = m_pipelineLayout]() {
-            vkDestroyPipelineLayout(device, layout, nullptr);
-        });
-    }
-
-    // 6. Grid Pipeline Layout
-    if (!m_gridPipelineLayout) {
-        VkPushConstantRange gridPushConstant{};
-        gridPushConstant.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
-        gridPushConstant.offset = 0;
-        gridPushConstant.size = sizeof(GridPushConstants);
-
-        VkPipelineLayoutCreateInfo gridLayoutInfo{};
-        gridLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-        gridLayoutInfo.setLayoutCount = 0;
-        gridLayoutInfo.pSetLayouts = nullptr;
-        gridLayoutInfo.pushConstantRangeCount = 1;
-        gridLayoutInfo.pPushConstantRanges = &gridPushConstant;
-
-        const VkResult res = vkCreatePipelineLayout(m_context->GetDevice(), &gridLayoutInfo, nullptr, &m_gridPipelineLayout);
-        CHECK_VK_RESULT(res, "Failed to create grid pipeline layout");
-        m_deletionQueue.Push([device = m_context->GetDevice(), layout = m_gridPipelineLayout]() {
-            vkDestroyPipelineLayout(device, layout, nullptr);
-        });
-    }
-
-    // 7. Command Pool & Command Buffers
-    if (!m_commandPool) {
-        m_commandPool = m_context->CreateCommandPool(VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT);
-        m_commandBuffers = m_context->AllocateCommandBuffers(m_commandPool, Swapchain::MAX_FRAMES_IN_FLIGHT);
-        m_deletionQueue.Push([device = m_context->GetDevice(), pool = m_commandPool]() {
-            vkDestroyCommandPool(device, pool, nullptr);
-        });
-    }
-}
-
-void EditorApp::CreateRenderPipeline() {
-    // Destroy previous graphics & wireframe pipelines if rebuilding for MSAA
-    if (m_graphicsPipeline != VK_NULL_HANDLE) {
-        vkDestroyPipeline(m_context->GetDevice(), m_graphicsPipeline, nullptr);
-        m_graphicsPipeline = VK_NULL_HANDLE;
-    }
-    if (m_wireframePipeline != VK_NULL_HANDLE) {
-        vkDestroyPipeline(m_context->GetDevice(), m_wireframePipeline, nullptr);
-        m_wireframePipeline = VK_NULL_HANDLE;
-    }
-
-    const auto& vCode = GetOrLoadSPIRV("shaders/compiled/mesh.vert.spv");
-    const auto& fCode = GetOrLoadSPIRV("shaders/compiled/mesh.frag.spv");
-
-    VkShaderModule vertModule = PipelineBuilder::CreateShaderModule(*m_context, vCode);
-    VkShaderModule fragModule = PipelineBuilder::CreateShaderModule(*m_context, fCode);
-
-    const std::vector<VkVertexInputAttributeDescription> attribs = {
-        { .location = 0, .binding = 0, .format = VK_FORMAT_R32G32B32_SFLOAT, .offset = static_cast<uint32_t>(offsetof(Vertex, position)) },
-        { .location = 1, .binding = 0, .format = VK_FORMAT_R32G32B32_SFLOAT, .offset = static_cast<uint32_t>(offsetof(Vertex, normal)) },
-        { .location = 2, .binding = 0, .format = VK_FORMAT_R32G32_SFLOAT,    .offset = static_cast<uint32_t>(offsetof(Vertex, uv)) }
-    };
-
-    const VkSampleCountFlagBits msaaSamples = m_viewportPanel ? m_viewportPanel->GetMSAASamples() : VK_SAMPLE_COUNT_1_BIT;
-    m_currentPipelineMSAASamples = msaaSamples;
-
-    PipelineBuilder builder;
-    builder.SetShaders(vertModule, fragModule)
-           .SetVertexInput(Vertex::GetBindingDescriptions(), attribs)
-           .SetColorAttachmentFormat(VK_FORMAT_R8G8B8A8_UNORM)
-           .SetDepthFormat(VK_FORMAT_D32_SFLOAT)
-           .SetCullMode(VK_CULL_MODE_NONE, VK_FRONT_FACE_COUNTER_CLOCKWISE)
-           .SetMultisampling(msaaSamples, false)
-           .EnableDepthTest(true, VK_COMPARE_OP_LESS_OR_EQUAL);
-
-    m_graphicsPipeline = builder.Build(*m_context, m_pipelineLayout);
-
-    builder.SetPolygonMode(VK_POLYGON_MODE_LINE);
-    m_wireframePipeline = builder.Build(*m_context, m_pipelineLayout);
-
-    vkDestroyShaderModule(m_context->GetDevice(), vertModule, nullptr);
-    vkDestroyShaderModule(m_context->GetDevice(), fragModule, nullptr);
-}
-
-void EditorApp::CreateGridPipeline() {
-    if (m_gridPipeline != VK_NULL_HANDLE) {
-        vkDestroyPipeline(m_context->GetDevice(), m_gridPipeline, nullptr);
-        m_gridPipeline = VK_NULL_HANDLE;
-    }
-
-    const auto& vCode = GetOrLoadSPIRV("shaders/compiled/grid.vert.spv");
-    const auto& fCode = GetOrLoadSPIRV("shaders/compiled/grid.frag.spv");
-
-    VkShaderModule vertModule = PipelineBuilder::CreateShaderModule(*m_context, vCode);
-    VkShaderModule fragModule = PipelineBuilder::CreateShaderModule(*m_context, fCode);
-
-    const VkSampleCountFlagBits msaaSamples = m_viewportPanel ? m_viewportPanel->GetMSAASamples() : VK_SAMPLE_COUNT_1_BIT;
-
-    PipelineBuilder gridBuilder;
-    gridBuilder.SetShaders(vertModule, fragModule)
-               .SetColorAttachmentFormat(VK_FORMAT_R8G8B8A8_UNORM)
-               .SetDepthFormat(VK_FORMAT_D32_SFLOAT)
-               .SetCullMode(VK_CULL_MODE_NONE, VK_FRONT_FACE_COUNTER_CLOCKWISE)
-               .SetMultisampling(msaaSamples, false)
-               .EnableDepthTest(false, VK_COMPARE_OP_LESS_OR_EQUAL)
-               .EnableAlphaBlending();
-
-    m_gridPipeline = gridBuilder.Build(*m_context, m_gridPipelineLayout);
-
-    vkDestroyShaderModule(m_context->GetDevice(), vertModule, nullptr);
-    vkDestroyShaderModule(m_context->GetDevice(), fragModule, nullptr);
 }
 
 void EditorApp::BuildSampleScene() {
@@ -804,10 +182,10 @@ void EditorApp::BuildSampleScene() {
     demoNode->mesh = MeshComponent::CreateCube(*m_context, 1.0f);
     SceneNode* demoPtr = m_rootNode->AddChild(std::move(demoNode));
 
-    if (m_nodeGraphEditorPanel) {
+    if (m_uiSubsystem && m_uiSubsystem->GetNodeGraphEditorPanel()) {
         // Bind demo mesh as target scene node and initialize graph
-        m_nodeGraphEditorPanel->SetTargetSceneNode(demoPtr);
-        auto graphMesh = m_nodeGraphEditorPanel->GetActiveOutputMesh();
+        m_uiSubsystem->GetNodeGraphEditorPanel()->SetTargetSceneNode(demoPtr);
+        auto graphMesh = m_uiSubsystem->GetNodeGraphEditorPanel()->GetActiveOutputMesh();
         m_activeDisplayMesh = graphMesh ? graphMesh : demoPtr->mesh;
     } else {
         m_activeDisplayMesh = demoPtr->mesh;
@@ -833,179 +211,20 @@ void EditorApp::BuildSampleScene() {
     clip->tracks.push_back(track);
 
     m_timeline.SetClip(clip);
-    // Animation starts PAUSED — user must press Play in the Timeline panel
     m_camera.FocusOnTarget(glm::vec3(0.0f), 3.5f);
-}
-
-// ---------------------------------------------------------------------------
-// Recursive scene graph renderer
-// ---------------------------------------------------------------------------
-void EditorApp::DrawSceneNode(VkCommandBuffer cmd, SceneNode* node, const glm::mat4& parentTransform, uint32_t currentFrame) {
-    if (!node) return;
-
-    // If this node (or its entire subtree) is invisible, skip it
-    if (!node->visible) return;
-
-    // Compose world transform from parent and this node's local transform
-    glm::mat4 worldTransform = parentTransform * node->GetLocalTransform();
-
-    // Draw the node's mesh (if it has one), or light gizmo stub if it's a light node
-    std::shared_ptr<MeshComponent> targetMesh = node->mesh;
-
-    glm::mat4 renderTransform = worldTransform;
-
-    if (targetMesh) {
-        VkDescriptorSet textureDS = targetMesh->HasTexture() ?
-            targetMesh->GetTexture()->GetDescriptorSet() :
-            m_defaultWhiteTexture->GetDescriptorSet();
-
-        VkDescriptorSet sets[2] = {
-            m_lightDescriptorSets[currentFrame % Swapchain::MAX_FRAMES_IN_FLIGHT],
-            textureDS
-        };
-
-        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, m_pipelineLayout,
-                                0, 2, sets, 0, nullptr);
-
-        PushConstants push{};
-        push.model = renderTransform;
-        push.mvp   = m_camera.GetViewProjectionMatrix() * renderTransform;
-        push.baseColorFactor = targetMesh->GetBaseColorFactor();
-        push.emissiveFactor  = glm::vec4(0.0f, 0.0f, 0.0f, 1.0f);
-        push.useTexture = targetMesh->HasTexture() ? 1 : 0;
-        push.shininess = 32.0f;
-        push.specularStrength = 0.5f;
-        push.ambientStrength = 0.15f;
-
-        // 1. Shaded Solid Pass (if Off or Overlay)
-        if (node->wireframeMode != WireframeMode::WireframeOnly) {
-            vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, m_graphicsPipeline);
-            vkCmdPushConstants(cmd, m_pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
-                               0, sizeof(PushConstants), &push);
-            targetMesh->Draw(cmd);
-        }
-
-        // 2. Wireframe Pass (if Overlay or WireframeOnly)
-        if (node->wireframeMode == WireframeMode::Overlay || node->wireframeMode == WireframeMode::WireframeOnly) {
-            vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, m_wireframePipeline);
-            PushConstants wirePush = push;
-            if (node->wireframeMode == WireframeMode::Overlay) {
-                // High-contrast bright cyan overlay lines over solid mesh for topology inspection
-                wirePush.baseColorFactor = glm::vec4(0.0f, 0.0f, 0.0f, 1.0f);
-                wirePush.useTexture = 0;
-            }
-            vkCmdPushConstants(cmd, m_pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
-                               0, sizeof(PushConstants), &wirePush);
-            targetMesh->Draw(cmd);
-        }
-    }
-
-    // Recurse into children
-    for (const auto& child : node->GetChildren()) {
-        DrawSceneNode(cmd, child.get(), worldTransform, currentFrame);
-    }
-}
-
-void EditorApp::RenderViewportOffscreen(VkCommandBuffer cmd, uint32_t currentFrame) {
-    UpdateLightUBO(currentFrame);
-    // Guard: don't attempt to render if the framebuffer image view is null
-    if (m_viewportPanel->GetColorImageView(currentFrame) == VK_NULL_HANDLE) return;
-
-    // Rebuild pipelines if MSAA sample count changed
-    if (m_currentPipelineMSAASamples != m_viewportPanel->GetMSAASamples()) {
-        m_context->WaitIdle();
-        CreateRenderPipeline();
-        CreateGridPipeline();
-    }
-
-    m_viewportPanel->TransitionToColorAttachment(cmd, currentFrame);
-
-    VkSampleCountFlagBits msaaSamples = m_viewportPanel->GetMSAASamples();
-
-    VkRenderingAttachmentInfo colorAttachment{};
-    colorAttachment.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
-    if (msaaSamples > VK_SAMPLE_COUNT_1_BIT) {
-        colorAttachment.imageView = m_viewportPanel->GetMSAAColorImageView(currentFrame);
-        colorAttachment.resolveMode = VK_RESOLVE_MODE_AVERAGE_BIT;
-        colorAttachment.resolveImageView = m_viewportPanel->GetColorImageView(currentFrame);
-        colorAttachment.resolveImageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-    } else {
-        colorAttachment.imageView = m_viewportPanel->GetColorImageView(currentFrame);
-    }
-    colorAttachment.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-    colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-    colorAttachment.storeOp = (msaaSamples > VK_SAMPLE_COUNT_1_BIT) ? VK_ATTACHMENT_STORE_OP_DONT_CARE : VK_ATTACHMENT_STORE_OP_STORE;
-    colorAttachment.clearValue.color = { 0.12f, 0.14f, 0.18f, 1.0f };
-
-    VkRenderingAttachmentInfo depthAttachment{};
-    depthAttachment.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
-    depthAttachment.imageView = (msaaSamples > VK_SAMPLE_COUNT_1_BIT) ? m_viewportPanel->GetMSAADepthImageView(currentFrame) : m_viewportPanel->GetDepthImageView(currentFrame);
-    depthAttachment.imageLayout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL;
-    depthAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-    depthAttachment.storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-    depthAttachment.clearValue.depthStencil = { 1.0f, 0 };
-
-    VkRenderingInfo renderingInfo{};
-    renderingInfo.sType = VK_STRUCTURE_TYPE_RENDERING_INFO;
-    renderingInfo.renderArea = { {0, 0}, {m_viewportPanel->GetWidth(), m_viewportPanel->GetHeight()} };
-    renderingInfo.layerCount = 1;
-    renderingInfo.colorAttachmentCount = 1;
-    renderingInfo.pColorAttachments = &colorAttachment;
-    renderingInfo.pDepthAttachment = &depthAttachment;
-
-    vkCmdBeginRendering(cmd, &renderingInfo);
-
-    VkViewport viewport{};
-    viewport.x = 0.0f;
-    viewport.y = 0.0f;
-    viewport.width  = static_cast<float>(m_viewportPanel->GetWidth());
-    viewport.height = static_cast<float>(m_viewportPanel->GetHeight());
-    viewport.minDepth = 0.0f;
-    viewport.maxDepth = 1.0f;
-    vkCmdSetViewport(cmd, 0, 1, &viewport);
-
-    VkRect2D scissor{};
-    scissor.offset = { 0, 0 };
-    scissor.extent = { m_viewportPanel->GetWidth(), m_viewportPanel->GetHeight() };
-    vkCmdSetScissor(cmd, 0, 1, &scissor);
-
-    // 1. Draw Scene Graph Meshes
-    if (m_rootNode) {
-        DrawSceneNode(cmd, m_rootNode.get(), glm::mat4(1.0f), currentFrame);
-    }
-
-    // 2. Draw 3D Infinite Ground Grid (if enabled)
-    if (m_viewportPanel->IsGridVisible() && m_gridPipeline != VK_NULL_HANDLE) {
-        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, m_gridPipeline);
-
-        GridPushConstants gridPush{};
-        gridPush.viewProj = m_camera.GetViewProjectionMatrix();
-        gridPush.invViewProj = glm::inverse(m_camera.GetViewProjectionMatrix());
-        gridPush.cameraPos = glm::vec4(m_camera.GetPosition(), 1.0f);
-        gridPush.gridParams = glm::vec4(
-            m_viewportPanel->GetGridCellSize(),
-            m_viewportPanel->GetGridMajorStep(),
-            m_viewportPanel->GetGridFadeDistance(),
-            m_viewportPanel->GetGridOpacity()
-        );
-
-        vkCmdPushConstants(cmd, m_gridPipelineLayout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
-                           0, sizeof(GridPushConstants), &gridPush);
-
-        // Draw procedural 6-vertex infinite grid quad without vertex buffers
-        vkCmdDraw(cmd, 6, 1, 0, 0);
-    }
-
-    vkCmdEndRendering(cmd);
-
-    m_viewportPanel->TransitionToShaderRead(cmd, currentFrame);
 }
 
 void EditorApp::RecordCommandBuffer(VkCommandBuffer cmd, uint32_t imageIndex, uint32_t currentFrame) {
     khepri::ScopedCommandBuffer scopedCmd(cmd);
 
-    // 1. Offscreen 3D Viewport Pass
-    RenderViewportOffscreen(cmd, currentFrame);
+    // 1. Offscreen 3D Viewport Pass via SceneRendererSubsystem
+    if (m_sceneRenderer) {
+        m_sceneRenderer->RenderViewportOffscreen(
+            cmd, currentFrame,
+            m_uiSubsystem ? m_uiSubsystem->GetViewportPanel() : nullptr,
+            m_rootNode.get(), m_camera
+        );
+    }
 
     // 2. Transition swapchain image: UNDEFINED -> COLOR_ATTACHMENT_OPTIMAL
     {
@@ -1103,77 +322,13 @@ void EditorApp::Run() {
             continue;
         }
 
-        // Start ImGui Frame
+        // Poll OS events and execute Subsystems Update & RenderUI after fence wait
         m_window.PollEvents();
-        ImGui_ImplVulkan_NewFrame();
-        ImGui_ImplGlfw_NewFrame();
-        m_oracleBridge.PollEvents(ImGui::GetIO(), m_window.GetWidth(), m_window.GetHeight());
-        ImGui::NewFrame();
-
-        ImGuiID dockspaceID = ImGui::DockSpaceOverViewport(0, ImGui::GetMainViewport());
-        RenderMainMenuBar(dockspaceID);
-
-        if (m_rebuildLayout) {
-            m_rebuildLayout = false;
-            ApplyDockLayout(dockspaceID);
+        if (m_uiSubsystem) {
+            m_uiSubsystem->SetCurrentFrame(currentFrame, deltaTime);
         }
-
-        // Render UI panels
-        if (m_showViewport && m_viewportPanel) {
-            m_viewportPanel->RenderUI(m_camera, currentFrame, deltaTime,
-                                      m_sceneTreePanel->GetSelectedNode(), m_rootNode.get());
-        }
-        if (m_showSceneTree && m_sceneTreePanel) {
-            const auto& selectedAsset = m_assetManagerPanel ? m_assetManagerPanel->GetSelectedPath() : std::filesystem::path();
-            m_sceneTreePanel->RenderUI(m_rootNode.get(), m_activeDisplayMesh, selectedAsset,
-                                       m_nodeGraphEditorPanel.get());
-        }
-        if (m_showTimeline && m_timelinePanel) {
-            m_timelinePanel->RenderUI(m_timeline, m_sceneTreePanel->GetSelectedNode(), m_rootNode.get());
-        }
-        if (m_showVulkanInspector && m_vulkanInspectorPanel) {
-            m_vulkanInspectorPanel->RenderUI(*m_swapchain);
-        }
-        if (m_showNodeGraph && m_nodeGraphEditorPanel) {
-            m_nodeGraphEditorPanel->ValidateTargetSceneNode(m_rootNode.get());
-            SceneNode* selected = m_sceneTreePanel ? m_sceneTreePanel->GetSelectedNode() : nullptr;
-            if (m_nodeGraphEditorPanel->GetTargetSceneNode() != selected) {
-                m_nodeGraphEditorPanel->SetTargetSceneNode(selected);
-            }
-
-            m_nodeGraphEditorPanel->RenderUI(m_activeDisplayMesh);
-            
-            // Synchronize active graph output mesh to target SceneNode (excluding lights)
-            if (selected && selected->mesh && m_activeDisplayMesh && !selected->lightComponent) {
-                selected->mesh = m_activeDisplayMesh;
-            }
-        }
-        if (m_showAssetManager && m_assetManagerPanel) {
-            m_assetManagerPanel->RenderUI(&m_showAssetManager);
-        }
-        if (m_showLogConsole) {
-            RenderEngineLogConsole(&m_showLogConsole);
-        }
-
-        // Global Keyboard Shortcuts (Undo: Ctrl+Z, Redo: Ctrl+Y / Ctrl+Shift+Z, Fullscreen: F11 / Alt+Enter)
-        ImGuiIO& io = ImGui::GetIO();
-        if (!io.WantTextInput) {
-            if (ImGui::IsKeyPressed(ImGuiKey_F11, false) ||
-                (io.KeyAlt && ImGui::IsKeyPressed(ImGuiKey_Enter, false))) {
-                m_window.ToggleFullscreen();
-            } else if (io.KeyCtrl && !io.KeyShift && ImGui::IsKeyPressed(ImGuiKey_Z, false)) {
-                if (m_undoStack.CanUndo()) {
-                    m_undoStack.Undo();
-                }
-            } else if ((io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_Y, false)) ||
-                       (io.KeyCtrl && io.KeyShift && ImGui::IsKeyPressed(ImGuiKey_Z, false))) {
-                if (m_undoStack.CanRedo()) {
-                    m_undoStack.Redo();
-                }
-            }
-        }
-
-        ImGui::Render();
+        m_subsystemManager.UpdateAll(deltaTime);
+        m_subsystemManager.RenderUIAll();
 
         // Record Commands & Submit
         VkCommandBuffer cmd = m_commandBuffers[currentFrame];
