@@ -23,7 +23,8 @@ public:
     PipelineBuilder& EnableAlphaBlending();
     PipelineBuilder& SetColorAttachmentFormat(VkFormat format);
     PipelineBuilder& SetDepthFormat(VkFormat format);
-    PipelineBuilder& EnableDepthTest(bool depthWriteEnable, VkCompareOp op);
+    PipelineBuilder& EnableDepthTest(bool depthWriteEnable = true, VkCompareOp op = VK_COMPARE_OP_LESS_OR_EQUAL);
+    PipelineBuilder& SetDepthTest(bool depthTestEnable, bool depthWriteEnable, VkCompareOp op = VK_COMPARE_OP_LESS_OR_EQUAL);
 
     [[nodiscard]] VkPipeline Build(VulkanContext& context, VkPipelineLayout layout);
 

@@ -64,7 +64,12 @@ public:
     ScopedCommandBuffer& operator=(ScopedCommandBuffer&& other) noexcept {
         if (this != &other) {
             if (m_isRecording && m_commandBuffer != VK_NULL_HANDLE) {
-                End();
+                VkResult res = vkEndCommandBuffer(m_commandBuffer);
+                if (res != VK_SUCCESS) {
+                    LOG_ERROR("Failed to end command buffer recording in ScopedCommandBuffer::operator=: " +
+                              std::string(VkResultToString(res)));
+                }
+                m_isRecording = false;
             }
             m_commandBuffer = other.m_commandBuffer;
             m_isRecording = other.m_isRecording;

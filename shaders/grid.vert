@@ -2,7 +2,6 @@
 
 layout(push_constant) uniform GridPushConstants {
     mat4 viewProj;
-    mat4 invViewProj;
     vec4 cameraPos;
     vec4 gridParams; // x = cellSize, y = majorStep, z = maxDistance, w = opacity
 } pc;
@@ -22,9 +21,10 @@ const vec3 gridPlane[6] = vec3[](
 );
 
 void main() {
+    mat4 invViewProj = inverse(pc.viewProj);
     vec3 p = gridPlane[gl_VertexIndex];
     // In Vulkan standard clip space, near plane is z = 0.0, far plane is z = 1.0
-    nearPoint = UnprojectPoint(p.x, p.y, 0.0, pc.invViewProj);
-    farPoint  = UnprojectPoint(p.x, p.y, 1.0, pc.invViewProj);
+    nearPoint = UnprojectPoint(p.x, p.y, 0.0, invViewProj);
+    farPoint  = UnprojectPoint(p.x, p.y, 1.0, invViewProj);
     gl_Position = vec4(p, 1.0);
 }

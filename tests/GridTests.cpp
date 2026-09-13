@@ -28,7 +28,21 @@ bool IntersectGroundPlane(const glm::vec3& nearP, const glm::vec3& farP, glm::ve
     return true;
 }
 
+// Mathematical 96-byte Grid Push Constants matching shaders/grid.vert and shaders/grid.frag
+struct GridPushConstantsTest {
+    glm::mat4 viewProj;
+    glm::vec4 cameraPos;
+    glm::vec4 gridParams;
+};
+
 } // namespace
+
+TEST(GridTest, PushConstantsSizeConformsToVulkanSpec) {
+    // Vulkan specification guarantees maxPushConstantsSize >= 128 bytes.
+    // Our streamlined grid push constants layout must be <= 128 bytes (strictly 96 bytes).
+    EXPECT_LE(sizeof(GridPushConstantsTest), 128u);
+    EXPECT_EQ(sizeof(GridPushConstantsTest), 96u);
+}
 
 TEST(GridTest, UnprojectionNearFarPlanes) {
     Camera camera(glm::vec3(0.0f, 5.0f, 10.0f), glm::vec3(0.0f, 0.0f, 0.0f));

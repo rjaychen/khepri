@@ -2,7 +2,6 @@
 
 layout(push_constant) uniform GridPushConstants {
     mat4 viewProj;
-    mat4 invViewProj;
     vec4 cameraPos;
     vec4 gridParams; // x = cellSize (e.g. 1.0), y = majorStep (e.g. 10.0), z = maxDistance (e.g. 100.0), w = opacity (e.g. 0.8)
 } pc;

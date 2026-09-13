@@ -46,6 +46,7 @@ void Swapchain::Recreate(uint32_t width, uint32_t height) {
     CreateSwapchain(width, height);
     CreateImageViews();
     CreateDepthResources();
+    CreateSyncObjects();
     LOG_INFO("Swapchain recreated (" + std::to_string(m_extent.width) + "x" + std::to_string(m_extent.height) + ")");
 }
 
@@ -208,7 +209,6 @@ void Swapchain::CreateSyncObjects() {
 
 VkResult Swapchain::AcquireNextImage(uint32_t* imageIndex) {
     m_inFlightFences[m_currentFrame].Wait();
-    m_inFlightFences[m_currentFrame].Reset();
 
     // Signal m_spareSemaphore (always unsignaled at this point).
     VkResult result = vkAcquireNextImageKHR(
@@ -217,6 +217,7 @@ VkResult Swapchain::AcquireNextImage(uint32_t* imageIndex) {
     );
 
     if (result == VK_SUCCESS || result == VK_SUBOPTIMAL_KHR) {
+        m_inFlightFences[m_currentFrame].Reset();
         // Swap spare with the per-image semaphore so:
         //   imageAvailableSemaphores[imageIndex] = freshly signaled semaphore (submit waits on this)
         //   m_spareSemaphore = old per-image semaphore (already consumed, safe to reuse next acquire)

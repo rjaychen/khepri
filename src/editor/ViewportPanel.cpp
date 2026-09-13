@@ -449,8 +449,9 @@ void ViewportPanel::RenderUI(Camera& camera, uint32_t currentFrame, float deltaT
         // 1. Light Helper Visuals & Billboard Icons
         // Suppress hover hit-testing while actively navigating the camera — prevents cursor sweeping
         // over light icons from triggering selection flashes or intercepting camera mouse input.
+        // Hover is preserved during stationary potential clicks.
         m_hoveredLightNode = nullptr;
-        const glm::vec2 hoverPos = m_isCameraNavigating ? glm::vec2(-1.0f, -1.0f) : mousePos;
+        const glm::vec2 hoverPos = (m_isCameraNavigating && !m_isPotentialClick) ? glm::vec2(-1.0f, -1.0f) : mousePos;
         khepri::LightVisualizer::RenderSceneLights(
             drawList,
             camera,
@@ -498,25 +499,38 @@ void ViewportPanel::RenderUI(Camera& camera, uint32_t currentFrame, float deltaT
     }
 
     ImGuiIO& io = ImGui::GetIO();
+    const bool inViewport = (m_isHovered || m_isFocused);
+    const bool lmbDown = ImGui::IsMouseDown(ImGuiMouseButton_Left);
+    const bool mmbDown = ImGui::IsMouseDown(ImGuiMouseButton_Middle);
 
-    // Light icon and 3D Mesh viewport click selection via Raycasting
-    if ((m_isHovered || m_isFocused) && !ImGui::IsAnyItemActive() && !m_gizmo.IsUsing() && !m_gizmo.IsHovered() && !m_isCameraNavigating) {
+    // Cancel pending click selection if RMB or MMB navigation is initiated
+    if (rmbDown || mmbDown) {
+        m_isPotentialClick = false;
+        m_isOrbitDragging = false;
+    }
+
+    // 1. Mouse Down: Start potential click selection if clicking inside viewport on empty space / mesh / light
+    if (inViewport && !ImGui::IsAnyItemActive() && !m_gizmo.IsUsing() && !m_gizmo.IsHovered() && !m_viewCube.IsHovered() && !m_isCameraNavigating) {
         if (ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
             m_clickStartPos = io.MousePos;
             m_isPotentialClick = true;
+            m_isOrbitDragging = false;
         }
     }
 
-    if (m_isPotentialClick && ImGui::IsMouseDown(ImGuiMouseButton_Left)) {
+    // 2. Mouse Hold / Drag: Check if drag threshold (> 4px) is crossed to transition from click to camera orbit
+    if (m_isPotentialClick && lmbDown) {
         float dragDist = std::hypot(io.MousePos.x - m_clickStartPos.x, io.MousePos.y - m_clickStartPos.y);
         if (dragDist > 4.0f) {
             m_isPotentialClick = false;
+            m_isOrbitDragging = true;
         }
     }
 
+    // 3. Mouse Release: If still a potential click, execute raycast picking selection
     if (m_isPotentialClick && ImGui::IsMouseReleased(ImGuiMouseButton_Left)) {
         m_isPotentialClick = false;
-        if ((m_isHovered || m_isFocused) && !ImGui::IsAnyItemActive() && !m_gizmo.IsUsing() && !m_gizmo.IsHovered() && !m_viewCube.IsHovered() && !m_isCameraNavigating) {
+        if (inViewport && !ImGui::IsAnyItemActive() && !m_gizmo.IsUsing() && !m_gizmo.IsHovered() && !m_viewCube.IsHovered()) {
             if (m_hoveredLightNode) {
                 if (m_onSelectNode) {
                     m_onSelectNode(const_cast<SceneNode*>(m_hoveredLightNode));
@@ -533,18 +547,17 @@ void ViewportPanel::RenderUI(Camera& camera, uint32_t currentFrame, float deltaT
         }
     }
 
-    bool lmbDown = ImGui::IsMouseDown(ImGuiMouseButton_Left);
-    bool mmbDown = ImGui::IsMouseDown(ImGuiMouseButton_Middle);
-
-    const bool anyNavButtonDown = rmbDown || mmbDown || (lmbDown && !m_gizmo.IsUsing() && !m_gizmo.IsHovered());
-    const bool inViewport = (m_isHovered || m_isFocused);
-
-    if (inViewport && anyNavButtonDown && !ImGui::IsAnyItemActive()) {
-        m_isCameraNavigating = true;
+    // Reset dragging state when LMB is released
+    if (!lmbDown) {
+        m_isPotentialClick = false;
+        m_isOrbitDragging = false;
     }
-    if (!anyNavButtonDown) {
-        m_isCameraNavigating = false;
-    }
+
+    // Active camera navigation tracking:
+    // Only true when actively navigating via RMB (fly/look), MMB (pan), or LMB orbit drag (> 4px).
+    // Stationary left clicks do NOT activate camera navigation.
+    const bool anyNavButtonDown = rmbDown || mmbDown || m_isOrbitDragging;
+    m_isCameraNavigating = (inViewport && anyNavButtonDown && !ImGui::IsAnyItemActive());
 
     // RMB cursor lock: enable raw mouse motion for fly/look; restore on release.
     if (m_window) {
@@ -578,7 +591,7 @@ void ViewportPanel::RenderUI(Camera& camera, uint32_t currentFrame, float deltaT
             if (std::abs(io.MouseDelta.x) > 0.001f || std::abs(io.MouseDelta.y) > 0.001f) {
                 camera.Pan(io.MouseDelta.x, io.MouseDelta.y);
             }
-        } else if (lmbDown) {
+        } else if (m_isOrbitDragging && !m_viewCube.IsHovered()) {
             if (std::abs(io.MouseDelta.x) > 0.001f || std::abs(io.MouseDelta.y) > 0.001f) {
                 camera.Orbit(io.MouseDelta.x, io.MouseDelta.y);
             }
@@ -795,12 +808,7 @@ SceneNode* ViewportPanel::RaycastScene(
         }
     };
 
-    for (const auto& child : rootNode->GetChildren()) {
-        traverse(traverse, child.get());
-    }
-    if (!closestNode && rootNode->mesh) {
-        traverse(traverse, rootNode);
-    }
+    traverse(traverse, rootNode);
 
     return closestNode;
 }
