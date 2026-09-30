@@ -384,11 +384,11 @@ void ViewportPanel::RenderUI(Camera& camera, uint32_t currentFrame, float deltaT
         // Debounce framebuffer recreation:
         // Execute immediately if first creation (m_colorImage == VK_NULL_HANDLE),
         // or user is not holding left mouse,
-        // or dimensions have remained stable for >120ms.
+        // or dimensions have remained stable for >60ms (snappy pause detection).
         bool shouldExecuteResize = false;
         if (m_resizePending) {
             auto elapsedMs = std::chrono::duration_cast<std::chrono::milliseconds>(now - m_lastResizeRequestTime).count();
-            if (m_frames[0].color.image == VK_NULL_HANDLE || !ImGui::IsMouseDown(ImGuiMouseButton_Left) || elapsedMs > 120) {
+            if (m_frames[0].color.image == VK_NULL_HANDLE || !ImGui::IsMouseDown(ImGuiMouseButton_Left) || elapsedMs > 60) {
                 shouldExecuteResize = true;
                 m_resizePending = false;
             }
@@ -404,21 +404,23 @@ void ViewportPanel::RenderUI(Camera& camera, uint32_t currentFrame, float deltaT
     }
 
     // Display image with proper aspect-ratio letterboxing/pillarboxing for fixed resolution modes
+    // or during active resize dragging to preserve scene proportions without texture squashing/stretching
     ImVec2 displaySize = viewportSize;
     bool isFixedRes = (m_resMode == ResolutionMode::Fixed720p ||
                        m_resMode == ResolutionMode::Fixed1080p ||
                        m_resMode == ResolutionMode::Fixed1440p);
+    bool isAspectPreservingDrag = m_resizePending && (m_width > 0 && m_height > 0);
 
-    if (isFixedRes && m_width > 0 && m_height > 0) {
+    if ((isFixedRes || isAspectPreservingDrag) && m_width > 0 && m_height > 0) {
         float targetAspect = static_cast<float>(m_width) / static_cast<float>(m_height);
         float availAspect = viewportSize.x / std::max(1.0f, viewportSize.y);
 
         if (availAspect > targetAspect) {
-            // Panel is wider than 16:9 -> pillarbox (black bars on left & right)
+            // Panel is wider than aspect ratio -> pillarbox (borders on left & right)
             displaySize.y = viewportSize.y;
             displaySize.x = viewportSize.y * targetAspect;
         } else {
-            // Panel is taller than 16:9 -> letterbox (black bars on top & bottom)
+            // Panel is taller than aspect ratio -> letterbox (borders on top & bottom)
             displaySize.x = viewportSize.x;
             displaySize.y = viewportSize.x / targetAspect;
         }
