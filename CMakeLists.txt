@@ -4,7 +4,7 @@ if(POLICY CMP0135)
     cmake_policy(SET CMP0135 NEW)
 endif()
 
-project(KhepriEngine VERSION 0.1.9 LANGUAGES C CXX)
+project(KhepriEngine VERSION 0.1.10 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -108,6 +108,8 @@ set(SHADER_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/shaders")
 set(SHADER_SOURCES
     ${SHADER_SOURCE_DIR}/mesh.vert
     ${SHADER_SOURCE_DIR}/mesh.frag
+    ${SHADER_SOURCE_DIR}/grid.vert
+    ${SHADER_SOURCE_DIR}/grid.frag
     ${SHADER_SOURCE_DIR}/deform_twist.comp
     ${SHADER_SOURCE_DIR}/deform_wave.comp
 )
@@ -337,6 +339,8 @@ if(BUILD_TESTS)
         src/editor/SceneTreePanel.h
         src/editor/AssetManagerPanel.cpp
         src/editor/AssetManagerPanel.h
+        src/editor/ViewportPanel.cpp
+        src/editor/ViewportPanel.h
     )
 
     add_executable(KhepriEngineTests

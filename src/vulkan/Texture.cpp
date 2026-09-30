@@ -8,7 +8,7 @@
 #include <cstring>
 
 Texture::Texture(VulkanContext& context, uint32_t width, uint32_t height, const unsigned char* pixels,
-                 VkDescriptorSetLayout setLayout, DescriptorAllocator& allocator, VkBuffer lightUBOBuffer)
+                 VkDescriptorSetLayout setLayout, DescriptorAllocator& allocator)
     : m_context(context), m_width(width), m_height(height) {
     if (width == 0 || height == 0 || !pixels) {
         throw std::runtime_error("Invalid texture dimensions or null pixel data!");
@@ -17,7 +17,7 @@ Texture::Texture(VulkanContext& context, uint32_t width, uint32_t height, const 
     CreateTextureImage(pixels);
     CreateImageView();
     CreateSampler();
-    CreateDescriptorSet(setLayout, allocator, lightUBOBuffer);
+    CreateDescriptorSet(setLayout, allocator);
 }
 
 Texture::~Texture() {
@@ -195,49 +195,46 @@ void Texture::CreateSampler() {
     }
 }
 
-void Texture::CreateDescriptorSet(VkDescriptorSetLayout setLayout, DescriptorAllocator& allocator, VkBuffer lightUBOBuffer) {
+void Texture::CreateDescriptorSet(VkDescriptorSetLayout setLayout, DescriptorAllocator& allocator) {
     m_descriptorSet = allocator.Allocate(setLayout);
 
     DescriptorWriter writer;
     writer.WriteImage(0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, m_imageView, m_sampler, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
-    if (lightUBOBuffer != VK_NULL_HANDLE) {
-        writer.WriteBuffer(1, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, lightUBOBuffer, sizeof(LightUBO));
-    }
     writer.UpdateSet(m_context, m_descriptorSet);
 }
 
 std::shared_ptr<Texture> Texture::CreateFromMemory(VulkanContext& context, const uint8_t* data, size_t size,
-                                                  VkDescriptorSetLayout setLayout, DescriptorAllocator& allocator, VkBuffer lightUBOBuffer) {
+                                                  VkDescriptorSetLayout setLayout, DescriptorAllocator& allocator) {
     int width, height, channels;
     stbi_uc* pixels = stbi_load_from_memory(data, static_cast<int>(size), &width, &height, &channels, STBI_rgb_alpha);
     if (!pixels) {
         LOG_WARN("Failed to decode image from memory using stb_image. Falling back to default white texture.");
-        return CreateWhiteTexture(context, setLayout, allocator, lightUBOBuffer);
+        return CreateWhiteTexture(context, setLayout, allocator);
     }
 
     auto texture = std::make_shared<Texture>(context, static_cast<uint32_t>(width), static_cast<uint32_t>(height),
-                                            pixels, setLayout, allocator, lightUBOBuffer);
+                                            pixels, setLayout, allocator);
     stbi_image_free(pixels);
     return texture;
 }
 
 std::shared_ptr<Texture> Texture::CreateFromFile(VulkanContext& context, const std::string& filepath,
-                                                VkDescriptorSetLayout setLayout, DescriptorAllocator& allocator, VkBuffer lightUBOBuffer) {
+                                                VkDescriptorSetLayout setLayout, DescriptorAllocator& allocator) {
     int width, height, channels;
     stbi_uc* pixels = stbi_load(filepath.c_str(), &width, &height, &channels, STBI_rgb_alpha);
     if (!pixels) {
         LOG_WARN("Failed to load image file from disk: " + filepath + ". Falling back to white texture.");
-        return CreateWhiteTexture(context, setLayout, allocator, lightUBOBuffer);
+        return CreateWhiteTexture(context, setLayout, allocator);
     }
 
     auto texture = std::make_shared<Texture>(context, static_cast<uint32_t>(width), static_cast<uint32_t>(height),
-                                            pixels, setLayout, allocator, lightUBOBuffer);
+                                            pixels, setLayout, allocator);
     stbi_image_free(pixels);
     return texture;
 }
 
 std::shared_ptr<Texture> Texture::CreateWhiteTexture(VulkanContext& context,
-                                                   VkDescriptorSetLayout setLayout, DescriptorAllocator& allocator, VkBuffer lightUBOBuffer) {
+                                                   VkDescriptorSetLayout setLayout, DescriptorAllocator& allocator) {
     unsigned char whitePixel[4] = {255, 255, 255, 255};
-    return std::make_shared<Texture>(context, 1, 1, whitePixel, setLayout, allocator, lightUBOBuffer);
+    return std::make_shared<Texture>(context, 1, 1, whitePixel, setLayout, allocator);
 }

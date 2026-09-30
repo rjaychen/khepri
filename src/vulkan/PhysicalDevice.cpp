@@ -6,7 +6,7 @@
 #include <stdexcept>
 #include <set>
 
-namespace Khepri {
+namespace khepri {
 
 VulkanPhysicalDevice::VulkanPhysicalDevice(VkPhysicalDevice device, VkSurfaceKHR surface)
     : m_handle(device) {
@@ -257,4 +257,4 @@ VulkanPhysicalDevice VulkanPhysicalDevice::SelectBest(const std::vector<VulkanPh
     return *bestDevice;
 }
 
-} // namespace Khepri
+} // namespace khepri

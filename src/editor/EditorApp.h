@@ -13,21 +13,35 @@
 #include "../scene/Light.h"
 #include "../vulkan/Buffer.h"
 #include "../animation/Timeline.h"
-#include "ViewportPanel.h"
-#include "SceneTreePanel.h"
-#include "TimelinePanel.h"
-#include "VulkanInspectorPanel.h"
-#include "NodeGraphEditorPanel.h"
-#include "AssetManagerPanel.h"
+#include "../core/EngineContext.h"
+#include "../core/SubsystemManager.h"
+#include "SceneRendererSubsystem.h"
+#include "EditorUISubsystem.h"
 #include "OracleBridge.h"
 #include "Theme.h"
 #include "ThumbnailCache.h"
 #include "../core/UndoStack.h"
 
-#include <imgui.h>
-#include <imgui_impl_glfw.h>
-#include <imgui_impl_vulkan.h>
 #include <memory>
+#include <vector>
+#include <functional>
+
+struct DeletionQueue {
+    std::vector<std::function<void()>> deletors;
+
+    void Push(std::function<void()>&& func) {
+        deletors.emplace_back(std::move(func));
+    }
+
+    void Flush() {
+        for (auto it = deletors.rbegin(); it != deletors.rend(); ++it) {
+            if (*it) {
+                (*it)();
+            }
+        }
+        deletors.clear();
+    }
+};
 
 class EditorApp {
 public:
@@ -52,35 +66,18 @@ public:
     [[nodiscard]] khepri::core::UndoStack& GetUndoStack() noexcept { return m_undoStack; }
     [[nodiscard]] const khepri::core::UndoStack& GetUndoStack() const noexcept { return m_undoStack; }
 
-private:
-    void InitImGui();
-    void InitRenderResources();
-    void CreateRenderPipeline();
-    void BuildSampleScene();
-    void RecordCommandBuffer(VkCommandBuffer cmd, uint32_t imageIndex);
-    void RenderViewportOffscreen(VkCommandBuffer cmd);
-    void RenderMainMenuBar(ImGuiID dockspaceID);
-    void ApplyDockLayout(ImGuiID dockspaceID);
+    [[nodiscard]] khepri::SubsystemManager& GetSubsystemManager() noexcept { return m_subsystemManager; }
+    [[nodiscard]] khepri::SceneRendererSubsystem* GetSceneRenderer() const noexcept { return m_sceneRenderer; }
+    [[nodiscard]] khepri::EditorUISubsystem* GetUISubsystem() const noexcept { return m_uiSubsystem; }
 
-    void UpdateLightUBO();
-    void DrawSceneNode(VkCommandBuffer cmd, SceneNode* node, const glm::mat4& parentTransform);
+private:
+    void BuildSampleScene();
+    void RecordCommandBuffer(VkCommandBuffer cmd, uint32_t imageIndex, uint32_t currentFrame);
 
     Window m_window;
     std::unique_ptr<VulkanContext> m_context;
     std::unique_ptr<Swapchain> m_swapchain;
     std::unique_ptr<DescriptorAllocator> m_descriptorAllocator;
-    std::unique_ptr<Buffer> m_lightUBOBuffer;
-
-    VkDescriptorPool m_imguiPool = VK_NULL_HANDLE;
-
-    // Viewport Pipeline
-    VkDescriptorSetLayout m_textureDescriptorSetLayout = VK_NULL_HANDLE;
-    std::shared_ptr<Texture> m_defaultWhiteTexture;
-
-    VkPipelineLayout m_pipelineLayout = VK_NULL_HANDLE;
-    VkPipeline m_graphicsPipeline = VK_NULL_HANDLE;
-    VkPipeline m_wireframePipeline = VK_NULL_HANDLE;
-    VkSampleCountFlagBits m_currentPipelineMSAASamples = VK_SAMPLE_COUNT_1_BIT;
 
     // Command Buffers
     VkCommandPool m_commandPool = VK_NULL_HANDLE;
@@ -89,38 +86,18 @@ private:
     // Scene & Camera
     Camera m_camera;
     std::shared_ptr<SceneNode> m_rootNode;
-    std::shared_ptr<MeshComponent> m_activeDisplayMesh; // tracked for inspector/camera focus
+    std::shared_ptr<MeshComponent> m_activeDisplayMesh;
     Timeline m_timeline;
     khepri::core::UndoStack m_undoStack;
 
-    // Viewport Texture Descriptor Set for ImGui (owned & updated by ViewportPanel::RenderUI)
-    VkDescriptorSet m_viewportDS = VK_NULL_HANDLE;
-
-    // Editor UI Panels
-    std::unique_ptr<ViewportPanel> m_viewportPanel;
-    std::unique_ptr<SceneTreePanel> m_sceneTreePanel;
-    std::unique_ptr<TimelinePanel> m_timelinePanel;
-    std::unique_ptr<VulkanInspectorPanel> m_vulkanInspectorPanel;
-    std::unique_ptr<khepri::NodeGraphEditorPanel> m_nodeGraphEditorPanel;
-    std::unique_ptr<khepri::AssetManagerPanel> m_assetManagerPanel;
-    std::unique_ptr<khepri::ui::ThumbnailCache> m_thumbnailCache;
-
-    // UI & DPI Scale
-    float m_uiScale = 1.0f;
-    float m_pendingFontScale = 0.0f;
-
-    // Window Visibility Toggles
-    bool m_showViewport = true;
-    bool m_showSceneTree = true;
-    bool m_showNodeGraph = true;
-    bool m_showTimeline = true;
-    bool m_showAssetManager = true; // Open on load-in by default
-    bool m_showVulkanInspector = false; // Untoggled by default
-    bool m_showLogConsole = true;
+    // Subsystem Management & Hierarchical Architecture
+    khepri::SubsystemManager m_subsystemManager;
+    std::unique_ptr<khepri::EngineContext> m_engineContext;
+    khepri::SceneRendererSubsystem* m_sceneRenderer = nullptr;
+    khepri::EditorUISubsystem* m_uiSubsystem = nullptr;
 
     EditorMode m_currentMode = EditorMode::MeshEditing;
-    bool m_rebuildLayout = true;
-    char m_gltfPathInput[512] = "assets/models/Box.gltf";
-    bool m_openGltfModal = false;
     khepri::OracleBridge m_oracleBridge;
+    DeletionQueue m_deletionQueue;
 };
+

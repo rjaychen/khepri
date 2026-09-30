@@ -6,7 +6,7 @@
 #include <span>
 #include <cstdint>
 
-namespace Khepri {
+namespace khepri {
 
 /**
  * @brief High-level descriptor for configuring a single-buffer submission with Vulkan 1.3 synchronization2.
@@ -100,4 +100,4 @@ private:
     mutable std::mutex m_submitMutex;
 };
 
-} // namespace Khepri
+} // namespace khepri

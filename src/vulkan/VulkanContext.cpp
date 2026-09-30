@@ -1,6 +1,7 @@
 #define VMA_IMPLEMENTATION
 #include "VulkanContext.h"
 #include "VulkanUtils.h"
+#include "CommandBuffer.h"
 #include "../core/Logger.h"
 #include <set>
 #include <stdexcept>
@@ -200,13 +201,13 @@ void VulkanContext::CreateSurface(GLFWwindow* window) {
 }
 
 void VulkanContext::PickPhysicalDevice() {
-    m_availableDevices = Khepri::VulkanPhysicalDevice::Enumerate(m_instance, m_surface);
+    m_availableDevices = khepri::VulkanPhysicalDevice::Enumerate(m_instance, m_surface);
     if (m_availableDevices.empty()) {
         LOG_ERROR("Failed to find GPUs with Vulkan support!");
         throw std::runtime_error("Failed to find GPUs with Vulkan support!");
     }
 
-    m_physicalDevice = Khepri::VulkanPhysicalDevice::SelectBest(m_availableDevices, m_deviceExtensions);
+    m_physicalDevice = khepri::VulkanPhysicalDevice::SelectBest(m_availableDevices, m_deviceExtensions);
 }
 
 void VulkanContext::CreateLogicalDevice() {
@@ -232,11 +233,14 @@ void VulkanContext::CreateLogicalDevice() {
     deviceFeatures.samplerAnisotropy = VK_TRUE;
     deviceFeatures.fillModeNonSolid = VK_TRUE; // Enable wireframe rendering for computational geometry!
 
-    // Vulkan 1.3 features (Dynamic Rendering & Synchronization2)
+    // Vulkan 1.3 features (Dynamic Rendering, Synchronization2, and DemoteToHelperInvocation)
     VkPhysicalDeviceVulkan13Features vulkan13Features{};
     vulkan13Features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES;
     vulkan13Features.dynamicRendering = VK_TRUE;
     vulkan13Features.synchronization2 = VK_TRUE;
+    if (m_physicalDevice.GetVulkan13Features().shaderDemoteToHelperInvocation) {
+        vulkan13Features.shaderDemoteToHelperInvocation = VK_TRUE;
+    }
 
     VkDeviceCreateInfo createInfo{};
     createInfo.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
@@ -264,15 +268,15 @@ void VulkanContext::CreateLogicalDevice() {
     vkGetDeviceQueue(m_device, queueFamilies.presentFamily.value(), 0, &presentQueue);
     vkGetDeviceQueue(m_device, queueFamilies.computeFamily.value(), 0, &computeQueue);
 
-    m_graphicsQueue = std::make_unique<Khepri::VulkanQueue>(
+    m_graphicsQueue = std::make_unique<khepri::VulkanQueue>(
         m_device, graphicsQueue, queueFamilies.graphicsFamily.value(), 0,
         VK_QUEUE_GRAPHICS_BIT | VK_QUEUE_COMPUTE_BIT | VK_QUEUE_TRANSFER_BIT
     );
-    m_presentQueue = std::make_unique<Khepri::VulkanQueue>(
+    m_presentQueue = std::make_unique<khepri::VulkanQueue>(
         m_device, presentQueue, queueFamilies.presentFamily.value(), 0,
         0
     );
-    m_computeQueue = std::make_unique<Khepri::VulkanQueue>(
+    m_computeQueue = std::make_unique<khepri::VulkanQueue>(
         m_device, computeQueue, queueFamilies.computeFamily.value(), 0,
         VK_QUEUE_COMPUTE_BIT | VK_QUEUE_TRANSFER_BIT
     );
@@ -341,17 +345,12 @@ void VulkanContext::ImmediateSubmit(std::function<void(VkCommandBuffer cmd)>&& a
     const VkCommandPool commandPool = CreateCommandPool(VK_COMMAND_POOL_CREATE_TRANSIENT_BIT);
     const VkCommandBuffer cmd = AllocateCommandBuffer(commandPool);
 
-    VkCommandBufferBeginInfo beginInfo{};
-    beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-    beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+    {
+        khepri::ScopedCommandBuffer scopedCmd(cmd, VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT);
+        action(cmd);
+    }
 
-    VkResult res = vkBeginCommandBuffer(cmd, &beginInfo);
-    CHECK_VK_RESULT(res, "Failed to begin command buffer in ImmediateSubmit");
-    action(cmd);
-    res = vkEndCommandBuffer(cmd);
-    CHECK_VK_RESULT(res, "Failed to end command buffer in ImmediateSubmit");
-
-    res = m_graphicsQueue->SubmitAndWait(cmd);
+    VkResult res = m_graphicsQueue->SubmitAndWait(cmd);
     CHECK_VK_RESULT(res, "Failed to submit command buffer in ImmediateSubmit");
 
     vkFreeCommandBuffers(m_device, commandPool, 1, &cmd);

@@ -1,7 +1,5 @@
 #version 450
 
-layout(set = 0, binding = 0) uniform sampler2D texSampler;
-
 struct LightData {
     vec4 position;   // xyz = pos, w = type (0 = Dir, 1 = Point, 2 = Spot)
     vec4 direction;  // xyz = dir, w = innerCutoff (cos)
@@ -9,10 +7,12 @@ struct LightData {
     vec4 params;     // x = constant, y = linear, z = quadratic, w = outerCutoff (cos)
 };
 
-layout(set = 0, binding = 1) uniform LightUBO {
+layout(set = 0, binding = 0) uniform LightUBO {
     vec4 cameraPos;  // xyz = viewPos, w = numLights
     LightData lights[16];
 } ubo;
+
+layout(set = 1, binding = 0) uniform sampler2D texSampler;
 
 layout(push_constant) uniform PushConstants {
     mat4 mvp;
